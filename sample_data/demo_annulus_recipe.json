@@ -1,0 +1,58 @@
+{
+  "software_name": "Overlay Mark Measurement Software",
+  "version": "1.0.5",
+  "measurement_config": {
+    "mode": "Single Image",
+    "pixel_size_x_um": 0.1,
+    "pixel_size_y_um": 0.1,
+    "registration_offset_x_um": 0.0,
+    "registration_offset_y_um": 0.0,
+    "overlay_definition": "upper_minus_lower",
+    "delta_x_limit_um": 20.0,
+    "delta_y_limit_um": 20.0,
+    "overlay_r_limit_um": 30.0,
+    "confidence_min": 0.5
+  },
+  "detection_params": {
+    "gaussian_sigma_px": 1.0,
+    "canny_low": 25.0,
+    "canny_high": 80.0,
+    "min_gradient": 2.0,
+    "profile_half_width_px": 2.0,
+    "profile_step_px": 0.25,
+    "fitting_mode": "Circle",
+    "upper_fitting_mode": "Circle",
+    "lower_fitting_mode": "Circle",
+    "use_ransac": true,
+    "residual_limit_px": 0.8,
+    "min_edge_points": 40,
+    "diameter_min_um": 0.0,
+    "diameter_max_um": 999999.0,
+    "polarity": "Auto"
+  },
+  "marks": [
+    {
+      "mark_id": "Mark1",
+      "upper_roi": {
+        "x": 170.0,
+        "y": 160.0,
+        "w": 180.0,
+        "h": 180.0,
+        "roi_type": "Annulus",
+        "inner_ratio": 0.72,
+        "target_edge": "All Edges",
+        "angle_deg": 0.0
+      },
+      "lower_roi": {
+        "x": 230.0,
+        "y": 188.0,
+        "w": 180.0,
+        "h": 180.0,
+        "roi_type": "Annulus",
+        "inner_ratio": 0.72,
+        "target_edge": "All Edges",
+        "angle_deg": 0.0
+      }
+    }
+  ]
+}

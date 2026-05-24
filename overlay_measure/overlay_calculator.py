@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import math
+from typing import Dict, Optional
+
+from .models import DetectionResult, MeasurementConfig, OverlayResult
+
+
+def calculate_overlay(mark_id: str, upper: DetectionResult, lower: DetectionResult, config: MeasurementConfig) -> OverlayResult:
+    off_x_px = config.registration_offset_x_um / config.pixel_size_x_um if config.pixel_size_x_um else 0.0
+    off_y_px = config.registration_offset_y_um / config.pixel_size_y_um if config.pixel_size_y_um else 0.0
+
+    lower_x_corr_px = lower.center_x_px + off_x_px
+    lower_y_corr_px = lower.center_y_px + off_y_px
+
+    delta_x_px = upper.center_x_px - lower_x_corr_px
+    delta_y_px = upper.center_y_px - lower_y_corr_px
+    delta_x_um = delta_x_px * config.pixel_size_x_um
+    delta_y_um = delta_y_px * config.pixel_size_y_um
+    r_um = math.sqrt(delta_x_um * delta_x_um + delta_y_um * delta_y_um)
+
+    warnings = []
+    if abs(delta_x_um) > config.delta_x_limit_um:
+        warnings.append("ΔX 超限")
+    if abs(delta_y_um) > config.delta_y_limit_um:
+        warnings.append("ΔY 超限")
+    if r_um > config.overlay_r_limit_um:
+        warnings.append("R 超限")
+    if upper.warning:
+        warnings.append(f"上层: {upper.warning}")
+    if lower.warning:
+        warnings.append(f"下层: {lower.warning}")
+
+    result = "Fail" if warnings else "Pass"
+    return OverlayResult(
+        mark_id=mark_id,
+        delta_x_px=delta_x_px,
+        delta_y_px=delta_y_px,
+        delta_x_um=delta_x_um,
+        delta_y_um=delta_y_um,
+        overlay_r_um=r_um,
+        result=result,
+        warning="; ".join(warnings),
+    )
+
+
+def calculate_relative_overlay(
+    mark_id: str,
+    reference: DetectionResult,
+    target: DetectionResult,
+    config: MeasurementConfig,
+) -> OverlayResult:
+    """Calculate target position relative to the selected reference contour."""
+    offset_x_px = config.registration_offset_x_um / config.pixel_size_x_um if config.pixel_size_x_um else 0.0
+    offset_y_px = config.registration_offset_y_um / config.pixel_size_y_um if config.pixel_size_y_um else 0.0
+
+    def corrected_center(detection: DetectionResult):
+        if config.mode == "Dual Image" and detection.layer == "lower":
+            return detection.center_x_px + offset_x_px, detection.center_y_px + offset_y_px
+        return detection.center_x_px, detection.center_y_px
+
+    reference_x, reference_y = corrected_center(reference)
+    target_x, target_y = corrected_center(target)
+    delta_x_px = target_x - reference_x
+    delta_y_px = target_y - reference_y
+    delta_x_um = delta_x_px * config.pixel_size_x_um
+    delta_y_um = delta_y_px * config.pixel_size_y_um
+    distance_um = math.hypot(delta_x_um, delta_y_um)
+    warnings = []
+    if abs(delta_x_um) > config.delta_x_limit_um:
+        warnings.append("Dx 超限")
+    if abs(delta_y_um) > config.delta_y_limit_um:
+        warnings.append("Dy 超限")
+    if distance_um > config.overlay_r_limit_um:
+        warnings.append("Dxy 超限")
+    return OverlayResult(
+        mark_id=mark_id,
+        delta_x_px=delta_x_px,
+        delta_y_px=delta_y_px,
+        delta_x_um=delta_x_um,
+        delta_y_um=delta_y_um,
+        overlay_r_um=distance_um,
+        result="Fail" if warnings else "Pass",
+        warning="；".join(warnings),
+    )
