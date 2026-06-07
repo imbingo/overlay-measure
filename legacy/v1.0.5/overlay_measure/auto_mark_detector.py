@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import List, Tuple
-import time
 
 import cv2
 import numpy as np
@@ -20,7 +19,7 @@ def _refine_contour_points(gray: np.ndarray, contour: np.ndarray, params: Detect
     gx = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3)
     points = contour.reshape(-1, 2).astype(np.float64)
-    stride = max(1, len(points) // 240)
+    stride = max(1, len(points) // 720)
     points = points[::stride]
     half_width = max(1.0, float(params.profile_half_width_px))
     step = max(0.05, float(params.profile_step_px))
@@ -255,10 +254,7 @@ def detect_auto_marks(
         _, mask = cv2.threshold(blurred, 0, 255, threshold_type + cv2.THRESH_OTSU)
         masks.append(mask)
 
-    # V1.4.1: skip the expensive full-image multi-circle RANSAC pre-pass.
-    # On low-contrast/noisy microscope images this step can consume a very long time
-    # before the normal contour-based auto detection runs, which appears as GUI freeze.
-    results = []
+    results = _detect_complete_circles(gray, layer, params, pixel_size_x_um, pixel_size_y_um)
     geometries: List[dict] = [
         {
             "center_x": result.center_x_px,
@@ -269,17 +265,9 @@ def detect_auto_marks(
     ]
     has_complete_circles = bool(results)
     mean_pixel_size = 0.5 * (pixel_size_x_um + pixel_size_y_um)
-    max_contours_per_mask = 96
-    max_results = 48
-    deadline = time.perf_counter() + 4.0
     for mask in masks:
-        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        # Large noisy images can produce thousands of contours. Sort by area and
-        # process only the most relevant ones to keep the GUI responsive.
-        contours = sorted(contours, key=lambda c: abs(float(cv2.contourArea(c))), reverse=True)[:max_contours_per_mask]
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
         for contour in contours:
-            if len(results) >= max_results or time.perf_counter() > deadline:
-                break
             area = abs(float(cv2.contourArea(contour)))
             perimeter = float(cv2.arcLength(contour, True))
             x, y, width, height = cv2.boundingRect(contour)
@@ -287,9 +275,6 @@ def detect_auto_marks(
                 continue
             if x <= 1 or y <= 1 or x + width >= image_u8.shape[1] - 1 or y + height >= image_u8.shape[0] - 1:
                 continue
-            # Very long contours are sampled before subpixel refinement to keep auto detection responsive.
-            if len(contour) > 1200:
-                contour = contour[::max(1, len(contour) // 1200)]
             refined, gradients = _refine_contour_points(gray, contour, params)
             if len(refined) < 12:
                 continue
@@ -347,6 +332,4 @@ def detect_auto_marks(
                         },
                     )
                 )
-        if time.perf_counter() > deadline:
-            break
     return sorted(results, key=lambda result: result.shape_params.get("radius_px", 0.0), reverse=True)

@@ -13,12 +13,8 @@ def calculate_overlay(mark_id: str, upper: DetectionResult, lower: DetectionResu
     lower_x_corr_px = lower.center_x_px + off_x_px
     lower_y_corr_px = lower.center_y_px + off_y_px
 
-    # Internal image coordinates use X right-positive and Y down-positive.
-    # Measurement output follows equipment/Keyence-style coordinates:
-    # X right-positive, Y up-positive. Therefore only the final Y delta is inverted.
     delta_x_px = upper.center_x_px - lower_x_corr_px
-    delta_y_image_px = upper.center_y_px - lower_y_corr_px
-    delta_y_px = -delta_y_image_px
+    delta_y_px = upper.center_y_px - lower_y_corr_px
     delta_x_um = delta_x_px * config.pixel_size_x_um
     delta_y_um = delta_y_px * config.pixel_size_y_um
     r_um = math.sqrt(delta_x_um * delta_x_um + delta_y_um * delta_y_um)
@@ -65,12 +61,8 @@ def calculate_relative_overlay(
 
     reference_x, reference_y = corrected_center(reference)
     target_x, target_y = corrected_center(target)
-    # Internal image coordinates use X right-positive and Y down-positive.
-    # Measurement output follows equipment/Keyence-style coordinates:
-    # X right-positive, Y up-positive. Therefore only the final Y delta is inverted.
     delta_x_px = target_x - reference_x
-    delta_y_image_px = target_y - reference_y
-    delta_y_px = -delta_y_image_px
+    delta_y_px = target_y - reference_y
     delta_x_um = delta_x_px * config.pixel_size_x_um
     delta_y_um = delta_y_px * config.pixel_size_y_um
     distance_um = math.hypot(delta_x_um, delta_y_um)

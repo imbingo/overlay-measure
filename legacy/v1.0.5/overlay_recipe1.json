@@ -1,0 +1,77 @@
+{
+  "software_name": "Overlay Mark Measurement Software",
+  "version": "1.0.5",
+  "measurement_config": {
+    "mode": "Dual Image",
+    "material_code": "",
+    "process_name": "",
+    "equipment_model": "",
+    "calibration_date": "",
+    "operator_name": "",
+    "pixel_size_x_um": 0.1,
+    "pixel_size_y_um": 0.1,
+    "registration_offset_x_um": 0.0,
+    "registration_offset_y_um": 0.0,
+    "overlay_definition": "upper_minus_lower",
+    "delta_x_limit_um": 0.5,
+    "delta_y_limit_um": 0.5,
+    "overlay_r_limit_um": 0.7,
+    "confidence_min": 0.7,
+    "rz_layout": "Y向前后分布",
+    "rz_distance_l_um": 1.0,
+    "rz_limit": 999999.0
+  },
+  "detection_params": {
+    "gaussian_sigma_px": 1.0,
+    "canny_low": 40.0,
+    "canny_high": 120.0,
+    "min_gradient": 5.0,
+    "profile_half_width_px": 2.0,
+    "profile_step_px": 0.25,
+    "fitting_mode": "EdgeCenter",
+    "upper_fitting_mode": "EdgeCenter",
+    "lower_fitting_mode": "EdgeCenter",
+    "use_ransac": true,
+    "residual_limit_px": 0.25,
+    "min_edge_points": 60,
+    "diameter_min_um": 0.0,
+    "diameter_max_um": 999999.0,
+    "polarity": "Auto"
+  },
+  "marks": [
+    {
+      "mark_id": "Mark1",
+      "upper_roi": {
+        "x": 189.03734957954276,
+        "y": 149.88415809018102,
+        "w": 104.78487530899962,
+        "h": 104.78487530899962,
+        "roi_type": "Caliper Circle",
+        "inner_ratio": 0.7944155684101502,
+        "target_edge": "All Edges",
+        "angle_deg": 0.0,
+        "caliper_count": 64,
+        "caliper_width_px": 8.0,
+        "search_direction": "Outer to Inner"
+      },
+      "lower_roi": {
+        "x": 201.40576576576575,
+        "y": 152.21549549549547,
+        "w": 96.0,
+        "h": 96.0,
+        "roi_type": "Caliper Circle",
+        "inner_ratio": 0.8043519495606568,
+        "target_edge": "All Edges",
+        "angle_deg": 0.0,
+        "caliper_count": 64,
+        "caliper_width_px": 8.0,
+        "search_direction": "Outer to Inner"
+      }
+    },
+    {
+      "mark_id": "Mark2",
+      "upper_roi": null,
+      "lower_roi": null
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "software_name": "Overlay Mark Measurement Software",
+  "version": "1.0",
+  "measurement_config": {
+    "mode": "Dual Image",
+    "pixel_size_x_um": 0.1,
+    "pixel_size_y_um": 0.1,
+    "registration_offset_x_um": 0.0,
+    "registration_offset_y_um": 0.0,
+    "overlay_definition": "upper_minus_lower",
+    "delta_x_limit_um": 0.5,
+    "delta_y_limit_um": 0.5,
+    "overlay_r_limit_um": 0.7,
+    "confidence_min": 0.7
+  },
+  "detection_params": {
+    "gaussian_sigma_px": 1.0,
+    "canny_low": 30.0,
+    "canny_high": 100.0,
+    "min_gradient": 2.0,
+    "profile_half_width_px": 2.0,
+    "profile_step_px": 0.25,
+    "fitting_mode": "Auto",
+    "use_ransac": true,
+    "residual_limit_px": 0.3,
+    "min_edge_points": 60,
+    "diameter_min_um": 0.0,
+    "diameter_max_um": 999999.0,
+    "polarity": "Auto"
+  },
+  "marks": [
+    {
+      "mark_id": "Mark1",
+      "upper_roi": {
+        "x": 170,
+        "y": 120,
+        "w": 160,
+        "h": 160
+      },
+      "lower_roi": {
+        "x": 168,
+        "y": 123,
+        "w": 160,
+        "h": 160
+      }
+    }
+  ]
+}

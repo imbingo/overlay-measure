@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import sys
+from datetime import datetime
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,30 +12,28 @@ from PIL import Image
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QFontDatabase, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
+    QFrame,
+    QGridLayout,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QFrame,
     QFileDialog,
     QFormLayout,
     QGroupBox,
-    QGridLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -44,16 +43,17 @@ from .auto_mark_detector import detect_auto_marks
 from .caliper_circle_detector import detect_caliper_circle
 from .circle_ellipse_fitter import fit_mark_shape
 from .image_loader import load_image, normalize_to_uint8
-from .models import DetectionParams, DetectionResult, ImageData, MarkRecipe, MeasurementConfig, Roi
+from .models import DetectionParams, DetectionResult, ImageData, MarkRecipe, MeasurementConfig, OverlayResult, Roi
 from .overlay_calculator import calculate_overlay, calculate_relative_overlay
 from .production_measurement import refine_candidate
 from .recipe_manager import load_recipe, save_recipe
 from .result_exporter import build_detection_rows, export_results
+from .region_center_detector import detect_region_center
 from .subpixel_edge_detector import detect_subpixel_edges
 
 
 LAYER_LABELS = {"upper": "上层", "lower": "下层"}
-STEP_TITLES = ["图像导入", "ROI 设置", "算法参数", "结果查看", "导出报告"]
+STEP_TITLES = ["产品与设备信息", "图像导入", "ROI 设置", "算法参数", "结果导出"]
 
 
 class SidebarComboBox(QComboBox):
@@ -71,6 +71,8 @@ class SidebarSpinBox(QSpinBox):
         event.ignore()
 
 
+
+
 class CollapsibleSection(QWidget):
     def __init__(self, title: str, expanded: bool = True, parent=None):
         super().__init__(parent)
@@ -84,13 +86,11 @@ class CollapsibleSection(QWidget):
         self.body_layout = QVBoxLayout(self.body)
         self.body_layout.setContentsMargins(0, 8, 0, 0)
         self.body_layout.setSpacing(10)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.toggle_btn)
         layout.addWidget(self.body)
-
         self.toggle_btn.toggled.connect(self._apply_state)
         self._apply_state(expanded)
 
@@ -159,7 +159,7 @@ class ImageCanvas(QLabel):
         self.pan_start_pos: Optional[QPoint] = None
         self.pan_start_x = 0.0
         self.pan_start_y = 0.0
-        self.setText(f"{title}\n等待导入图像")
+        self.setText("等待导入图像")
         self.setStyleSheet("QLabel { background: #2B2F36; color: #F5F6F8; border: 1px solid #3A404A; border-radius: 12px; }")
 
     def set_image(self, image: Optional[ImageData]):
@@ -170,7 +170,7 @@ class ImageCanvas(QLabel):
             self.pixmap_cache = self._make_pixmap(image.gray)
             self.setText("")
         else:
-            self.setText(f"{self.title}\n等待导入图像")
+            self.setText("等待导入图像")
         self.update()
 
     def set_context(
@@ -623,7 +623,7 @@ class ImageCanvas(QLabel):
 
         if self.pixmap_cache is None:
             painter.setPen(QColor("#F5F6F8"))
-            painter.drawText(self.rect(), Qt.AlignCenter, f"{self.title}\n等待导入图像")
+            painter.drawText(self.rect(), Qt.AlignCenter, "等待导入图像")
             painter.end()
             return
 
@@ -634,9 +634,34 @@ class ImageCanvas(QLabel):
         self._draw_overlays(painter)
 
         painter.setPen(QColor("#F5F6F8"))
-        painter.drawText(10, 20, f"{self.title}  缩放: {self.user_zoom:.2f}x")
+        painter.drawText(10, 20, f"缩放: {self.user_zoom:.2f}x")
         painter.drawText(10, 40, "滚轮缩放；右键/中键拖动画面；双击复位；左键拖 ROI，拖内/外环调范围")
+        self._draw_scale_and_axes(painter)
         painter.end()
+
+    def _draw_scale_and_axes(self, painter: QPainter):
+        if self.pixmap_cache is None or self.scale <= 0:
+            return
+        mean_um = max(1e-12, self._mean_pixel_size_um())
+        target_um = 50.0
+        for candidate in (5, 10, 20, 50, 100, 200, 500, 1000):
+            if candidate / mean_um * self.scale >= 60:
+                target_um = float(candidate)
+                break
+        bar_px_widget = target_um / mean_um * self.scale
+        x0 = 24
+        y0 = self.height() - 36
+        painter.setPen(QPen(QColor("#FFFFFF"), 3.0))
+        painter.drawLine(int(x0), int(y0), int(x0 + bar_px_widget), int(y0))
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawText(int(x0), int(y0 - 8), f"{target_um:g} μm")
+        ax0 = self.width() - 92
+        ay0 = self.height() - 44
+        painter.setPen(QPen(QColor("#FFFFFF"), 2.0))
+        painter.drawLine(ax0, ay0, ax0 + 42, ay0)
+        painter.drawLine(ax0, ay0, ax0, ay0 - 42)
+        painter.drawText(ax0 + 48, ay0 + 5, "X")
+        painter.drawText(ax0 - 10, ay0 - 48, "Y")
 
     def _draw_overlays(self, painter: QPainter):
         if self.image is None:
@@ -692,8 +717,47 @@ class ImageCanvas(QLabel):
                             painter.drawText(
                                 int(cx + 12),
                                 int(cy - 12),
-                                f"中心=({det.center_x_um:.4f},{det.center_y_um:.4f}) μm 半径={radius_um:.4f} μm 残差={det.residual_um:.4f} μm 置信度={det.confidence:.3f}",
+                                f"中心=({det.center_x_um:.3f},{det.center_y_um:.3f}) μm 半径={radius_um:.3f} μm 残差={det.residual_um:.3f} μm 置信度={det.confidence:.3f}",
                             )
+                    elif det.fitting_mode == "RegionCenter":
+                        # V1.4: region-center mode is area segmentation, not circle fitting.
+                        # Show only the final selected main contour and min-area box; do not
+                        # draw the equivalent-area circle because it is misleading for rounded square holes.
+                        contour_points = det.shape_params.get("contour_points", [])
+                        if contour_points:
+                            widget_points = [QPointF(*self.image_to_widget(float(px), float(py))) for px, py in contour_points]
+                            if len(widget_points) >= 3:
+                                fill_path = QPainterPath()
+                                fill_path.moveTo(widget_points[0])
+                                for pt in widget_points[1:]:
+                                    fill_path.lineTo(pt)
+                                fill_path.closeSubpath()
+                                painter.fillPath(fill_path, QColor(52, 199, 89, 36))
+                                contour_pen = QPen(QColor("#34C759"), 2.0)
+                                contour_pen.setCosmetic(True)
+                                painter.setPen(contour_pen)
+                                painter.drawPolygon(QPolygonF(widget_points))
+                        box_points = det.shape_params.get("region_box_points", [])
+                        if box_points:
+                            box_widget = [QPointF(*self.image_to_widget(float(px), float(py))) for px, py in box_points]
+                            if len(box_widget) >= 4:
+                                shadow_pen = QPen(QColor(255, 255, 255), 4.0)
+                                shadow_pen.setCosmetic(True)
+                                fit_pen = QPen(colors[layer], 2.0)
+                                fit_pen.setCosmetic(True)
+                                for pen in (shadow_pen, fit_pen):
+                                    painter.setPen(pen)
+                                    painter.drawPolygon(QPolygonF(box_widget))
+                        width = det.shape_params.get("width_px", 0.0) * self.pixel_size_x_um
+                        height = det.shape_params.get("height_px", 0.0) * self.pixel_size_y_um
+                        area = det.shape_params.get("region_area_px2", 0.0)
+                        polarity = det.shape_params.get("region_polarity", "")
+                        painter.setPen(QColor(255, 255, 255))
+                        painter.drawText(
+                            int(cx + 10),
+                            int(cy - 10),
+                            f"区域中心 W={width:.3f} μm H={height:.3f} μm 面积={area:.0f}px² {polarity}",
+                        )
                     elif det.fitting_mode == "Ellipse":
                         major = det.shape_params.get("major_px", det.diameter_px) * self.scale
                         minor = det.shape_params.get("minor_px", det.diameter_px) * self.scale
@@ -745,7 +809,7 @@ class ImageCanvas(QLabel):
                         painter.drawText(
                             label_x,
                             label_y,
-                            f"矩形 W={width * self.pixel_size_x_um:.4f} μm H={height * self.pixel_size_y_um:.4f} μm 角度={angle_deg:.1f}° 残差={det.residual_um:.4f} μm",
+                            f"矩形 W={width * self.pixel_size_x_um:.3f} μm H={height * self.pixel_size_y_um:.3f} μm 角度={angle_deg:.1f}° 残差={det.residual_um:.3f} μm",
                         )
 
         if self.show_auto_detections:
@@ -855,7 +919,7 @@ class ImageCanvas(QLabel):
                             int(x + direction_x * length / 2.0),
                             int(y + direction_y * length / 2.0),
                         )
-                    painter.setPen(QPen(QColor(0, 255, 80), 1.0))
+                    painter.setPen(QPen(QColor("#34C759"), 1.0))
                     for px, py in detection.edge_points:
                         x, y = self.image_to_widget(px, py)
                         painter.drawEllipse(QRectF(x - 2, y - 2, 4, 4))
@@ -1017,7 +1081,7 @@ class ImageCanvas(QLabel):
                                 grad_txt = f"{gradients[idx]:.3f}" if idx < len(gradients) else "-"
                                 best = (
                                     f"{mark_id} {LAYER_LABELS.get(layer, layer)} {state}\n"
-                                    f"坐标=({px * self.pixel_size_x_um:.4f}, {py * self.pixel_size_y_um:.4f}) μm\n梯度={grad_txt}"
+                                    f"坐标=({px * self.pixel_size_x_um:.3f}, {py * self.pixel_size_y_um:.3f}) μm\n梯度={grad_txt}"
                                 )
                                 best_dist = dist
         self.setToolTip(best or "")
@@ -1080,6 +1144,67 @@ class ImageCanvas(QLabel):
             self.update()
 
 
+
+class RepeatabilityPlot(QWidget):
+    """Lightweight repeatability trend plot without extra plotting dependencies."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.series = {}
+        self.setMinimumHeight(150)
+        self.setStyleSheet("QWidget { background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 10px; }")
+
+    def set_series(self, series: dict):
+        self.series = series or {}
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
+        margin_l, margin_r, margin_t, margin_b = 46, 16, 18, 30
+        rect = self.rect().adjusted(margin_l, margin_t, -margin_r, -margin_b)
+        painter.setPen(QPen(QColor("#DADDE3"), 1))
+        painter.drawRect(rect)
+        if not self.series:
+            painter.setPen(QColor("#6E6E73"))
+            painter.drawText(self.rect(), Qt.AlignCenter, "暂无重复性数据")
+            painter.end()
+            return
+        values = []
+        max_len = 0
+        for vals in self.series.values():
+            values.extend([float(v) for v in vals])
+            max_len = max(max_len, len(vals))
+        if not values or max_len <= 0:
+            painter.end(); return
+        vmin, vmax = min(values), max(values)
+        if abs(vmax - vmin) < 1e-12:
+            vmax = vmin + 1.0
+            vmin = vmin - 1.0
+        painter.setPen(QColor("#6E6E73"))
+        painter.drawText(8, rect.top() + 10, f"{vmax:.3f}")
+        painter.drawText(8, rect.bottom(), f"{vmin:.3f}")
+        palette = [QColor("#007AFF"), QColor("#FF9500"), QColor("#34C759"), QColor("#AF52DE")]
+        legend_x = rect.left() + 4
+        for idx, (name, vals) in enumerate(self.series.items()):
+            color = palette[idx % len(palette)]
+            painter.setPen(QPen(color, 2.0))
+            points = []
+            for i, val in enumerate(vals):
+                x = rect.left() + (rect.width() * i / max(1, max_len - 1))
+                y = rect.bottom() - (rect.height() * (float(val) - vmin) / (vmax - vmin))
+                points.append(QPointF(x, y))
+            for a, b in zip(points, points[1:]):
+                painter.drawLine(a, b)
+            for pt in points:
+                painter.drawEllipse(QRectF(pt.x() - 2.5, pt.y() - 2.5, 5, 5))
+            painter.drawText(legend_x, self.rect().bottom() - 8 - 16 * idx, name)
+        painter.setPen(QColor("#6E6E73"))
+        painter.drawText(rect.center().x() - 40, self.rect().bottom() - 8, "测量次数")
+        painter.end()
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1087,7 +1212,7 @@ class MainWindow(QMainWindow):
             if font_path.exists() and QFontDatabase.addApplicationFont(str(font_path)) >= 0:
                 break
         self.setFont(QFont("Microsoft YaHei UI", 9))
-        self.setWindowTitle("对位偏差测量软件 V1.1")
+        self.setWindowTitle("对位偏差测量软件 V1.4.2")
         self.resize(1500, 920)
 
         self.config = MeasurementConfig()
@@ -1114,197 +1239,42 @@ class MainWindow(QMainWindow):
             "Mark2": {"reference_label": "", "target_label": ""},
         }
         self.auto_overlays = {}
+        # V1.3: batch measurement data. Each mark can contain multiple static repeats.
+        self.batch_images: Dict[str, Dict[str, list[ImageData]]] = {
+            "Mark1": {"upper": [], "lower": []},
+            "Mark2": {"upper": [], "lower": []},
+        }
+        self.batch_overlays: Dict[str, list[OverlayResult]] = {"Mark1": [], "Mark2": []}
 
         self._apply_window_style()
         self._build_ui()
         self._connect_actions()
         self._refresh_all_widgets()
 
+
     def _apply_window_style(self):
-        self.setStyleSheet(
-            """
-            QMainWindow, QWidget {
-                background: #F5F6F8;
-                color: #1D1D1F;
-            }
-            QLabel#titleLabel {
-                font-size: 22px;
-                font-weight: 700;
-                color: #1D1D1F;
-            }
-            QLabel#versionLabel {
-                color: #6E6E73;
-                font-size: 12px;
-                padding-top: 4px;
-            }
-            QLabel#recipeLabel, QLabel#statusCaption, QLabel#statusValue, QLabel#stepNote, QLabel#imageCardTitle {
-                color: #6E6E73;
-            }
-            QLabel#recipeLabel {
-                font-size: 13px;
-            }
-            QFrame#toolbarDivider {
-                background: #E5E7EB;
-                min-width: 1px;
-                max-width: 1px;
-            }
-            QLabel#imageCardTitleUpper {
-                color: #007AFF;
-                font-size: 15px;
-                font-weight: 700;
-            }
-            QLabel#imageCardTitleLower {
-                color: #FF9500;
-                font-size: 15px;
-                font-weight: 700;
-            }
-            QLabel#resultValue {
-                font-size: 30px;
-                font-weight: 700;
-                color: #1D1D1F;
-            }
-            QLabel#resultUnit {
-                font-size: 12px;
-                color: #6E6E73;
-            }
-            QLabel#resultTitle {
-                font-size: 12px;
-                color: #6E6E73;
-            }
-            QFrame#toolbarCard, QFrame#stepCard, QFrame#resultCard, QFrame#summaryCard, QFrame#tableCard, QFrame#imageCard {
-                background: #FFFFFF;
-                border: 1px solid #E5E7EB;
-                border-radius: 14px;
-            }
-            QFrame#stepRow {
-                background: transparent;
-                border-radius: 10px;
-            }
-            QGroupBox, QScrollArea, QPlainTextEdit, QTableWidget {
-                background: #FFFFFF;
-                border: 1px solid #DADDE3;
-                border-radius: 12px;
-            }
-            QScrollArea { border: none; background: transparent; }
-            QGroupBox {
-                margin-top: 0px;
-                padding: 2px 0px 0px 0px;
-                font-weight: 600;
-                border: none;
-                background: transparent;
-            }
-            QGroupBox::title {
-                color: transparent;
-                width: 0px;
-                height: 0px;
-            }
-            QPushButton {
-                background: #FFFFFF;
-                border: 1px solid #E5E7EB;
-                border-radius: 10px;
-                padding: 8px 16px;
-                min-height: 18px;
-            }
-            QPushButton:hover {
-                border-color: #BFC5CF;
-                background: #FAFAFB;
-            }
-            QPushButton:pressed {
-                background: #EEF1F5;
-            }
-            QPushButton:disabled {
-                color: #A1A1A6;
-                background: #F3F4F6;
-            }
-            QPushButton#primaryButton {
-                background: #007AFF;
-                color: #FFFFFF;
-                border-color: #007AFF;
-                font-weight: 600;
-            }
-            QPushButton#dangerButton {
-                color: #FF3B30;
-            }
-            QToolButton#sectionToggle {
-                text-align: left;
-                font-weight: 600;
-                padding: 12px 14px;
-                background: #FFFFFF;
-                border: 1px solid #E5E7EB;
-                border-radius: 12px;
-            }
-            QToolButton#sectionToggle::menu-indicator {
-                image: none;
-            }
-            QToolButton#sectionToggle::down-arrow,
-            QToolButton#sectionToggle::right-arrow {
-                width: 10px;
-                height: 10px;
-            }
-            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox {
-                background: #FFFFFF;
-                border: 1px solid #DADDE3;
-                border-radius: 8px;
-                padding: 6px 8px;
-                min-height: 18px;
-            }
-            QComboBox::drop-down {
-                width: 20px;
-                border: none;
-            }
-            QCheckBox {
-                spacing: 8px;
-            }
-            QPlainTextEdit {
-                padding: 8px;
-                color: #1D1D1F;
-            }
-            QTableWidget {
-                gridline-color: #E6E8ED;
-                selection-background-color: #E8F1FF;
-                selection-color: #1D1D1F;
-            }
-            QHeaderView::section {
-                background: #F7F8FA;
-                border: none;
-                border-bottom: 1px solid #DADDE3;
-                padding: 8px 6px;
-                color: #6E6E73;
-                font-weight: 600;
-            }
-            QFormLayout {
-                row-wrap-policy: dont-wrap;
-            }
-            """
-        )
-
-    def _append_log(self, message: str):
-        if hasattr(self, "log_edit"):
-            self.log_edit.appendPlainText(message)
-
-    def _show_info(self, title: str, message: str):
-        self._append_log(f"[信息] {title}: {message.replace(chr(10), ' ')}")
-        QMessageBox.information(self, title, message)
-
-    def _show_warning(self, title: str, message: str):
-        self._append_log(f"[警告] {title}: {message.replace(chr(10), ' ')}")
-        QMessageBox.warning(self, title, message)
-
-    def _show_error(self, title: str, message: str):
-        self._append_log(f"[异常] {title}: {message.replace(chr(10), ' ')}")
-        QMessageBox.critical(self, title, message)
-
-    def _friendly_error(self, exc: Exception) -> str:
-        message = str(exc).strip()
-        if not message:
-            return "分析异常，请检查 ROI 是否框住目标边缘。"
-        if "有效边缘点不足" in message or "最少边缘点数" in message:
-            return "有效边缘点不足，请调整 ROI 或降低最小梯度。"
-        if "残差" in message:
-            return "拟合残差过大，请确认是否选中了正确的目标边缘。"
-        if "ROI" in message:
-            return "分析异常，请检查 ROI 是否框住目标边缘。"
-        return message
+        self.setStyleSheet("""
+            QMainWindow, QWidget { background: #F5F6F8; color: #1D1D1F; }
+            QLabel#titleLabel { font-size: 22px; font-weight: 700; color: #1D1D1F; }
+            QLabel#versionLabel, QLabel#recipeLabel, QLabel#statusCaption, QLabel#stepNote { color: #6E6E73; }
+            QLabel#imageCardTitleUpper { color: #007AFF; font-size: 15px; font-weight: 700; }
+            QLabel#imageCardTitleLower { color: #FF9500; font-size: 15px; font-weight: 700; }
+            QLabel#resultTitle { font-size: 12px; color: #6E6E73; }
+            QLabel#resultValue { font-size: 24px; font-weight: 700; color: #1D1D1F; }
+            QLabel#resultUnit { font-size: 12px; color: #6E6E73; }
+            QFrame#toolbarCard, QFrame#stepCard, QFrame#resultCard, QFrame#summaryCard, QFrame#imageCard { background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 14px; }
+            QGroupBox, QTableWidget, QPlainTextEdit { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 10px; margin-top: 8px; padding-top: 8px; }
+            QPlainTextEdit { padding: 8px; color: #1D1D1F; font-family: "Microsoft YaHei UI"; font-size: 12px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #1D1D1F; font-weight: 600; }
+            QPushButton { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 9px; padding: 7px 12px; min-height: 20px; }
+            QPushButton:hover { background: #FAFAFB; border-color: #BFC5CF; }
+            QPushButton#primaryButton { background: #007AFF; color: #FFFFFF; border-color: #007AFF; font-weight: 600; }
+            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 8px; padding: 5px 7px; min-height: 18px; }
+            QTabWidget::pane { border: 1px solid #E5E7EB; border-radius: 12px; background: #FFFFFF; }
+            QTabBar::tab { background: #F5F6F8; border: 1px solid #E5E7EB; padding: 8px 12px; margin-right: 2px; border-top-left-radius: 8px; border-top-right-radius: 8px; }
+            QTabBar::tab:selected { background: #FFFFFF; color: #007AFF; font-weight: 600; }
+            QToolButton#sectionToggle { text-align: left; font-weight: 600; padding: 10px 12px; background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 10px; }
+        """)
 
     def _build_ui(self):
         central = QWidget()
@@ -1316,170 +1286,171 @@ class MainWindow(QMainWindow):
         toolbar_card = QFrame()
         toolbar_card.setObjectName("toolbarCard")
         toolbar = QHBoxLayout(toolbar_card)
-        toolbar.setContentsMargins(16, 14, 16, 14)
+        toolbar.setContentsMargins(16, 12, 16, 12)
         toolbar.setSpacing(10)
         title_col = QVBoxLayout()
-        title_col.setSpacing(0)
+        title_col.setSpacing(2)
         title_row = QHBoxLayout()
-        title_row.setSpacing(12)
+        title_row.setSpacing(10)
         self.title_label = QLabel("对位偏差测量软件")
         self.title_label.setObjectName("titleLabel")
-        self.version_label = QLabel("V1.1")
+        self.version_label = QLabel("V1.4.2")
         self.version_label.setObjectName("versionLabel")
-        divider = QFrame()
-        divider.setObjectName("toolbarDivider")
-        divider.setFrameShape(QFrame.VLine)
+        self.current_recipe_label = QLabel("当前配方：未加载")
+        self.current_recipe_label.setObjectName("recipeLabel")
         title_row.addWidget(self.title_label)
         title_row.addWidget(self.version_label)
-        self.current_recipe_label = QLabel("Recipe: 未加载")
-        self.current_recipe_label.setObjectName("recipeLabel")
-        title_row.addWidget(divider)
+        title_row.addSpacing(12)
         title_row.addWidget(self.current_recipe_label)
         title_row.addStretch(1)
         title_col.addLayout(title_row)
+        self.workflow_hint_label = QLabel("模块化流程：产品信息 → 图像导入/批量导入 → ROI 设置 → 算法参数 → 计算与导出")
+        self.workflow_hint_label.setObjectName("statusCaption")
+        title_col.addWidget(self.workflow_hint_label)
 
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["单图模式", "双图模式"])
-        self.import_upper_btn = QPushButton("导入图像")
-        self.import_lower_btn = QPushButton("导入下层图像")
-        self.reset_measurement_btn = QPushButton("重置")
-        self.zoom_in_btn = QPushButton("放大")
-        self.zoom_out_btn = QPushButton("缩小")
-        self.reset_view_btn = QPushButton("复位")
-        self.analyze_roi_btn = QPushButton("分析当前 ROI")
-        self.analyze_current_btn = QPushButton("计算当前对位")
-        self.analyze_all_btn = QPushButton("开始分析")
-        self.save_recipe_btn = QPushButton("保存配方")
-        self.load_recipe_btn = QPushButton("加载配方")
-        self.export_btn = QPushButton("导出结果")
-        self.settings_btn = QPushButton("设置")
+        self.import_upper_btn = QPushButton("📂 导入上层/单图")
+        self.import_lower_btn = QPushButton("📁 导入下层图像")
+        self.load_recipe_btn = QPushButton("🧾 加载配方")
+        self.save_recipe_btn = QPushButton("💾 保存配方")
+        self.analyze_all_btn = QPushButton("▶ 计算对位偏差")
+        self.export_btn = QPushButton("📤 导出结果")
         self.analyze_all_btn.setObjectName("primaryButton")
-        self.reset_measurement_btn.setObjectName("dangerButton")
-
         toolbar.addLayout(title_col, stretch=1)
-        toolbar.addWidget(self.import_upper_btn)
-        toolbar.addWidget(self.load_recipe_btn)
-        toolbar.addWidget(self.save_recipe_btn)
-        toolbar.addWidget(self.analyze_all_btn)
-        toolbar.addWidget(self.export_btn)
-        toolbar.addWidget(self.settings_btn)
+        for btn in (self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn, self.save_recipe_btn, self.analyze_all_btn, self.export_btn):
+            toolbar.addWidget(btn)
         root.addWidget(toolbar_card)
 
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        root.addWidget(splitter, stretch=3)
+        main_splitter = QSplitter(Qt.Horizontal)
+        main_splitter.setChildrenCollapsible(False)
+        root.addWidget(main_splitter, stretch=3)
+        main_splitter.addWidget(self._build_step_panel())
 
-        self.step_panel = self._build_step_panel()
-        splitter.addWidget(self.step_panel)
+        center = QWidget()
+        center_layout = QVBoxLayout(center)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(10)
 
-        image_panel = QWidget()
-        image_layout = QVBoxLayout(image_panel)
-        image_layout.setContentsMargins(0, 0, 0, 0)
-        image_layout.setSpacing(10)
         image_toolbar = QFrame()
         image_toolbar.setObjectName("toolbarCard")
         image_toolbar_layout = QHBoxLayout(image_toolbar)
         image_toolbar_layout.setContentsMargins(12, 10, 12, 10)
         image_toolbar_layout.setSpacing(8)
-        self.image_status_label = QLabel("图像已加载后可设置 ROI 并开始离线分析")
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["单图模式", "双图模式"])
+        self.reset_measurement_btn = QPushButton("重置")
+        self.zoom_in_btn = QPushButton("放大")
+        self.zoom_out_btn = QPushButton("缩小")
+        self.reset_view_btn = QPushButton("复位")
+        self.analyze_roi_btn = QPushButton("分析 ROI 区域")
+        self.analyze_current_btn = QPushButton("计算当前对位")
+        self.analyze_current_btn.setVisible(False)
+        self.image_status_label = QLabel("等待导入图像")
         self.image_status_label.setObjectName("statusCaption")
-        image_toolbar_layout.addWidget(self.reset_measurement_btn)
-        image_toolbar_layout.addWidget(self.import_lower_btn)
+        image_toolbar_layout.addWidget(QLabel("图像模式"))
+        image_toolbar_layout.addWidget(self.mode_combo)
         image_toolbar_layout.addSpacing(8)
-        image_toolbar_layout.addWidget(self.zoom_in_btn)
-        image_toolbar_layout.addWidget(self.zoom_out_btn)
-        image_toolbar_layout.addWidget(self.reset_view_btn)
+        for btn in (self.reset_measurement_btn, self.zoom_in_btn, self.zoom_out_btn, self.reset_view_btn):
+            image_toolbar_layout.addWidget(btn)
         image_toolbar_layout.addStretch(1)
         image_toolbar_layout.addWidget(self.analyze_roi_btn)
-        image_toolbar_layout.addWidget(self.analyze_current_btn)
         image_toolbar_layout.addWidget(self.image_status_label)
-        image_layout.addWidget(image_toolbar)
+        center_layout.addWidget(image_toolbar)
 
-        canvas_row = QHBoxLayout()
-        canvas_row.setSpacing(12)
-        self.upper_canvas = ImageCanvas("Upper Image", fixed_layer=None)
-        self.lower_canvas = ImageCanvas("Lower Image", fixed_layer="lower")
-        self.upper_image_card = self._build_image_card("Upper Image", "upper", self.upper_canvas)
-        self.lower_image_card = self._build_image_card("Lower Image", "lower", self.lower_canvas)
-        canvas_row.addWidget(self.upper_image_card, stretch=1)
-        canvas_row.addWidget(self.lower_image_card, stretch=1)
-        image_layout.addLayout(canvas_row, stretch=4)
+        image_row = QHBoxLayout()
+        image_row.setSpacing(12)
+        self.upper_canvas = ImageCanvas("上层图像 / 单图", fixed_layer=None)
+        self.lower_canvas = ImageCanvas("下层图像", fixed_layer="lower")
+        self.upper_image_card = self._build_image_card("上层图像 / 单图", "upper", self.upper_canvas)
+        self.lower_image_card = self._build_image_card("下层图像", "lower", self.lower_canvas)
+        image_row.addWidget(self.upper_image_card, stretch=1)
+        image_row.addWidget(self.lower_image_card, stretch=1)
+        center_layout.addLayout(image_row, stretch=4)
 
-        self.right_scroll = QScrollArea()
-        self.right_scroll.setWidgetResizable(True)
-        self.right_scroll.setFrameShape(QFrame.NoFrame)
-        right_content = QWidget()
-        right_layout = QVBoxLayout(right_content)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(12)
-        right_layout.addWidget(self._build_basic_tab())
-        right_layout.addWidget(self._build_algo_tab())
-        right_layout.addWidget(self._build_spec_tab())
-        right_layout.addStretch(1)
-        self.right_scroll.setWidget(right_content)
-        self.right_scroll.setMinimumWidth(340)
-        self.right_scroll.setMaximumWidth(390)
+        center_layout.addWidget(self._build_summary_panel(), stretch=0)
 
-        bottom_panel = QSplitter(Qt.Vertical)
-        bottom_panel.setChildrenCollapsible(False)
-        bottom_panel.addWidget(self._build_summary_panel())
-        tables = QWidget()
-        tables_layout = QHBoxLayout(tables)
-        tables_layout.setContentsMargins(0, 0, 0, 0)
-        tables_layout.setSpacing(12)
+        # V1.2.5：取消独立操作日志区域，点击反馈只显示在左下角状态区。
+        # 下方区域恢复为左右分区：左侧为 ROI/识别明细，右侧为对位结果，避免信息比例失衡。
+        bottom_splitter = QSplitter(Qt.Horizontal)
+        bottom_splitter.setChildrenCollapsible(False)
+
         detail_card = QFrame()
         detail_card.setObjectName("tableCard")
         detail_layout = QVBoxLayout(detail_card)
-        detail_layout.setContentsMargins(12, 12, 12, 12)
-        detail_layout.setSpacing(10)
-        detail_layout.addWidget(QLabel("识别明细"))
+        detail_layout.setContentsMargins(10, 10, 10, 10)
+        detail_layout.setSpacing(8)
+        detail_title = QLabel("识别明细")
+        detail_title.setObjectName("resultTitle")
         self.det_table = QTableWidget()
+        self.det_table.setMinimumHeight(280)
+        detail_layout.addWidget(detail_title)
         detail_layout.addWidget(self.det_table)
-        summary_card = QFrame()
-        summary_card.setObjectName("tableCard")
-        summary_layout = QVBoxLayout(summary_card)
-        summary_layout.setContentsMargins(12, 12, 12, 12)
-        summary_layout.setSpacing(10)
-        summary_layout.addWidget(QLabel("结果与日志"))
-        self.overlay_table = QTableWidget()
-        self.log_edit = QPlainTextEdit()
-        self.log_edit.setReadOnly(True)
-        self.clear_log_btn = QPushButton("清空日志")
-        log_toolbar = QHBoxLayout()
-        log_toolbar.addWidget(QLabel("日志"))
-        log_toolbar.addStretch(1)
-        log_toolbar.addWidget(self.clear_log_btn)
-        summary_layout.addWidget(self.overlay_table)
-        summary_layout.addLayout(log_toolbar)
-        summary_layout.addWidget(self.log_edit)
-        tables_layout.addWidget(detail_card, stretch=3)
-        tables_layout.addWidget(summary_card, stretch=2)
-        bottom_panel.addWidget(tables)
-        bottom_panel.setSizes([150, 280])
-        image_layout.addWidget(bottom_panel, stretch=3)
 
-        splitter.addWidget(image_panel)
-        splitter.addWidget(self.right_scroll)
-        splitter.setSizes([190, 960, 350])
+        overlay_card = QFrame()
+        overlay_card.setObjectName("tableCard")
+        overlay_layout = QVBoxLayout(overlay_card)
+        overlay_layout.setContentsMargins(10, 10, 10, 10)
+        overlay_layout.setSpacing(8)
+        overlay_title = QLabel("对位结果")
+        overlay_title.setObjectName("resultTitle")
+        self.overlay_table = QTableWidget()
+        overlay_layout.addWidget(overlay_title)
+        self.result_tabs = QTabWidget()
+        overlay_tab = QWidget()
+        overlay_tab_layout = QVBoxLayout(overlay_tab)
+        overlay_tab_layout.setContentsMargins(0, 0, 0, 0)
+        self.overlay_table = QTableWidget()
+        self.overlay_table.setMinimumHeight(240)
+        overlay_tab_layout.addWidget(self.overlay_table)
+        repeat_tab = QWidget()
+        repeat_layout = QVBoxLayout(repeat_tab)
+        repeat_layout.setContentsMargins(0, 0, 0, 0)
+        repeat_layout.setSpacing(8)
+        self.repeat_plot = RepeatabilityPlot()
+        self.repeat_plot.setMinimumHeight(170)
+        self.repeat_table = QTableWidget()
+        self.repeat_table.setMinimumHeight(170)
+        repeat_layout.addWidget(self.repeat_plot, stretch=3)
+        repeat_layout.addWidget(self.repeat_table, stretch=4)
+        self.result_tabs.addTab(overlay_tab, "对位结果")
+        self.result_tabs.addTab(repeat_tab, "重复性分析")
+        self.result_tabs.setMinimumHeight(300)
+        overlay_layout.addWidget(self.result_tabs, stretch=1)
+
+        bottom_splitter.addWidget(detail_card)
+        bottom_splitter.addWidget(overlay_card)
+        bottom_splitter.setMinimumHeight(320)
+        bottom_splitter.setSizes([420, 720])
+        center_layout.addWidget(bottom_splitter, stretch=4)
+        main_splitter.addWidget(center)
+
+        self.side_tabs = QTabWidget()
+        for page, title in (
+            (self._build_product_tab(), "① 产品信息"),
+            (self._build_image_tab(), "② 图像导入"),
+            (self._build_roi_tab(), "③ ROI 设置"),
+            (self._build_algo_tab(), "④ 算法参数"),
+            (self._build_spec_tab(), "⑤ 结果导出"),
+        ):
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(page)
+            self.side_tabs.addTab(scroll, title)
+        main_splitter.addWidget(self.side_tabs)
+        main_splitter.setSizes([170, 1080, 350])
 
     def _build_image_card(self, title: str, layer: str, canvas: ImageCanvas) -> QWidget:
+        # V1.2：去掉图像区顶部的大标题条，减少占用空间，保留画布本身。
+        # 为了兼容原有刷新逻辑，仍保留一个隐藏的 title_label 属性。
         card = QFrame()
         card.setObjectName("imageCard")
         layout = QVBoxLayout(card)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        header = QFrame()
-        header.setObjectName("toolbarCard")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(14, 10, 14, 10)
-        header_layout.setSpacing(8)
-        title_label = QLabel(title)
-        title_label.setObjectName("imageCardTitleUpper" if layer == "upper" else "imageCardTitleLower")
-        header_layout.addWidget(title_label)
-        header_layout.addStretch(1)
-        layout.addWidget(header)
+        hidden_title = QLabel(title)
+        hidden_title.setVisible(False)
+        layout.addWidget(hidden_title)
         layout.addWidget(canvas)
-        card.title_label = title_label
+        card.title_label = hidden_title
         return card
 
     def _build_step_panel(self) -> QWidget:
@@ -1488,55 +1459,54 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 16, 14, 16)
         layout.setSpacing(10)
-        layout.addWidget(QLabel("分析流程"))
+        title = QLabel("分析流程")
+        title.setStyleSheet("font-weight: 700; font-size: 15px;")
+        layout.addWidget(title)
         self.step_rows = []
-        for index, title in enumerate(STEP_TITLES, start=1):
+        for index, title_text in enumerate(STEP_TITLES, start=1):
             row = QFrame()
             row.setObjectName("stepRow")
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 6, 0, 6)
-            row_layout.setSpacing(10)
+            row_layout.setContentsMargins(2, 7, 2, 7)
+            row_layout.setSpacing(8)
             dot = QLabel(str(index))
             dot.setAlignment(Qt.AlignCenter)
-            dot.setFixedSize(28, 28)
-            state_dot = QLabel("●")
-            state_dot.setAlignment(Qt.AlignCenter)
-            state_dot.setFixedWidth(14)
-            text_col = QVBoxLayout()
-            text_col.setContentsMargins(0, 0, 0, 0)
-            text_col.setSpacing(1)
-            label = QLabel(title)
+            dot.setFixedSize(26, 26)
+            label = QLabel(title_text)
             note = QLabel("")
             note.setObjectName("stepNote")
-            text_col.addWidget(label)
-            text_col.addWidget(note)
+            col = QVBoxLayout()
+            col.setContentsMargins(0, 0, 0, 0)
+            col.setSpacing(1)
+            col.addWidget(label)
+            col.addWidget(note)
+            state_dot = QLabel("●")
+            state_dot.setAlignment(Qt.AlignCenter)
             row_layout.addWidget(dot)
-            row_layout.addLayout(text_col, stretch=1)
+            row_layout.addLayout(col, stretch=1)
             row_layout.addWidget(state_dot)
             layout.addWidget(row)
             self.step_rows.append((row, dot, label, note, state_dot))
         layout.addStretch(1)
-        self.step_status_container = QWidget()
-        self.step_status_container.setVisible(False)
         self.workflow_status_dot = QLabel("●")
         self.workflow_status_label = QLabel("等待导入图像")
-        self.workflow_recipe_label = QLabel("Recipe: 未加载")
-        self.workflow_status_label.setObjectName("statusValue")
-        self.workflow_recipe_label.setObjectName("statusCaption")
-        status_row = QHBoxLayout(self.step_status_container)
-        status_row.setContentsMargins(0, 0, 0, 0)
-        status_row.setSpacing(8)
-        status_row.addWidget(self.workflow_status_dot)
-        status_row.addWidget(self.workflow_status_label, stretch=1)
-        layout.addWidget(self.step_status_container)
+        self.workflow_recipe_label = QLabel("当前配方：未加载")
+        status_layout = QVBoxLayout()
+        status_line = QHBoxLayout()
+        status_line.addWidget(self.workflow_status_dot)
+        status_line.addWidget(self.workflow_status_label)
+        status_line.addStretch(1)
+        status_layout.addLayout(status_line)
+        status_layout.addWidget(self.workflow_recipe_label)
+        layout.addLayout(status_layout)
         return card
 
     def _result_metric_card(self, title: str):
         card = QFrame()
         card.setObjectName("resultCard")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(2)
         title_label = QLabel(title)
         title_label.setObjectName("resultTitle")
         value_label = QLabel("--")
@@ -1546,110 +1516,33 @@ class MainWindow(QMainWindow):
         layout.addWidget(title_label)
         layout.addWidget(value_label)
         layout.addWidget(unit_label)
-        layout.addStretch(1)
         return card, value_label, unit_label
 
     def _build_summary_panel(self) -> QWidget:
         card = QFrame()
         card.setObjectName("summaryCard")
+        # V1.3.1：压缩顶部结果卡片高度，把更多垂直空间让给“对位结果/重复性分析”。
+        card.setMaximumHeight(108)
+        card.setMinimumHeight(86)
         layout = QGridLayout(card)
-        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setContentsMargins(10, 8, 10, 8)
         layout.setHorizontalSpacing(12)
-        layout.setVerticalSpacing(12)
+        layout.setVerticalSpacing(8)
         self.dx_card, self.dx_value_label, self.dx_unit_label = self._result_metric_card("ΔX")
         self.dy_card, self.dy_value_label, self.dy_unit_label = self._result_metric_card("ΔY")
-        self.r_card, self.r_value_label, self.r_unit_label = self._result_metric_card("Overlay R")
-        self.result_card, self.result_value_label, self.result_unit_label = self._result_metric_card("结果")
-        self.result_unit_label.setText("离线分析状态")
+        self.r_card, self.r_value_label, self.r_unit_label = self._result_metric_card("综合偏差 R")
+        self.result_card, self.result_value_label, self.result_unit_label = self._result_metric_card("判定结果")
         layout.addWidget(self.dx_card, 0, 0)
         layout.addWidget(self.dy_card, 0, 1)
         layout.addWidget(self.r_card, 0, 2)
         layout.addWidget(self.result_card, 0, 3)
+
         return card
 
-    def _build_basic_tab(self) -> QWidget:
+    def _build_product_tab(self) -> QWidget:
         w = QWidget()
         layout = QVBoxLayout(w)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-
-        section = CollapsibleSection("测量设置", True)
-        group = QGroupBox("测量设置")
-        form = QFormLayout(group)
-        self.mark_combo = SidebarComboBox()
-        self.layer_combo = SidebarComboBox()
-        self.layer_combo.addItem("上层", "upper")
-        self.layer_combo.addItem("下层", "lower")
-        self.mode_hint_label = QLabel("当前量测模式")
-        self.mode_hint_label.setObjectName("statusCaption")
-        self.pixel_size_summary_label = QLabel("0.100 μm/px")
-        self.pixel_size_summary_label.setObjectName("statusValue")
-        self.auto_reference_combo = SidebarComboBox()
-        self.auto_target_combo = SidebarComboBox()
-        self.overlay_definition_label = QLabel("当前定义：对位偏差 = 上层中心 - 下层中心")
-        self.overlay_definition_label.setObjectName("statusCaption")
-        self.overlay_definition_value = QLabel("上层 - 下层")
-        form.addRow("模式", self.mode_combo)
-        form.addRow("像素尺寸", self.pixel_size_summary_label)
-        form.addRow("叠加定义", self.overlay_definition_value)
-        form.addRow("", self.overlay_definition_label)
-        form.addRow("基准 Mark", self.auto_reference_combo)
-        form.addRow("待测 Mark", self.auto_target_combo)
-        section.add_widget(group)
-        layout.addWidget(section)
-
-        auto_section = CollapsibleSection("当前 Mark", True)
-        group_auto = QGroupBox("当前 Mark")
-        form_auto = QFormLayout(group_auto)
-        self.workflow_combo = SidebarComboBox()
-        self.workflow_combo.addItem("手动 ROI 测量", "Manual")
-        self.workflow_combo.addItem("自动识别测量", "Auto")
-        self.auto_detect_btn = QPushButton("自动识别当前 Mark")
-        self.auto_ref_shape_combo = SidebarComboBox()
-        self.auto_target_shape_combo = SidebarComboBox()
-        for combo in (self.auto_ref_shape_combo, self.auto_target_shape_combo):
-            combo.addItem("任意", "Any")
-            combo.addItem("圆形", "Circle")
-            combo.addItem("方形", "Rectangle")
-        self.auto_ref_size_min_spin = SidebarDoubleSpinBox()
-        self.auto_ref_size_max_spin = SidebarDoubleSpinBox()
-        self.auto_target_size_min_spin = SidebarDoubleSpinBox()
-        self.auto_target_size_max_spin = SidebarDoubleSpinBox()
-        for spin in (self.auto_ref_size_min_spin, self.auto_ref_size_max_spin, self.auto_target_size_min_spin, self.auto_target_size_max_spin):
-            spin.setRange(0.0, 1000000000.0)
-            spin.setDecimals(6)
-        self.auto_ref_size_max_spin.setValue(999999.0)
-        self.auto_target_size_max_spin.setValue(999999.0)
-        self.auto_calculate_btn = QPushButton("自动计算对位偏差")
-        self.diagnostic_check = QCheckBox("显示诊断信息（原始轮廓 / 边缘点）")
-        self.production_status_label = QLabel("自动模式：正式精测结果")
-        form_auto.addRow("Mark编号", self.mark_combo)
-        form_auto.addRow("当前层", self.layer_combo)
-        form_auto.addRow("工作方式", self.workflow_combo)
-        self.auto_workflow_panel = QWidget()
-        auto_workflow_form = QFormLayout(self.auto_workflow_panel)
-        auto_workflow_form.setContentsMargins(0, 6, 0, 0)
-        auto_workflow_form.addRow(self.auto_detect_btn)
-        auto_workflow_form.addRow(self.auto_calculate_btn)
-        self.auto_rule_section = CollapsibleSection("自动匹配规则", False)
-        auto_rule_group = QGroupBox("自动匹配规则")
-        auto_rule_form = QFormLayout(auto_rule_group)
-        auto_rule_form.addRow("基准预期外形", self.auto_ref_shape_combo)
-        auto_rule_form.addRow("基准尺寸下限 (μm)", self.auto_ref_size_min_spin)
-        auto_rule_form.addRow("基准尺寸上限 (μm)", self.auto_ref_size_max_spin)
-        auto_rule_form.addRow("待测预期外形", self.auto_target_shape_combo)
-        auto_rule_form.addRow("待测尺寸下限 (μm)", self.auto_target_size_min_spin)
-        auto_rule_form.addRow("待测尺寸上限 (μm)", self.auto_target_size_max_spin)
-        auto_rule_form.addRow(self.diagnostic_check)
-        auto_rule_form.addRow(self.production_status_label)
-        self.auto_rule_section.add_widget(auto_rule_group)
-        auto_workflow_form.addRow(self.auto_rule_section)
-        form_auto.addRow(self.auto_workflow_panel)
-        auto_section.add_widget(group_auto)
-        layout.addWidget(auto_section)
-
-        info_section = CollapsibleSection("产品与配方信息", False)
-        group_info = QGroupBox("产品与配方信息")
+        group_info = QGroupBox("产品与设备信息")
         form_info = QFormLayout(group_info)
         self.material_code_edit = QLineEdit()
         self.recipe_name_edit = QLineEdit()
@@ -1669,55 +1562,110 @@ class MainWindow(QMainWindow):
         form_info.addRow("测量设备型号", self.equipment_model_edit)
         form_info.addRow("设备校准日期", self.calibration_date_edit)
         form_info.addRow("操作人员", self.operator_name_edit)
-        info_section.add_widget(group_info)
-        layout.addWidget(info_section)
+        layout.addWidget(group_info)
+        hint = QLabel("提示：保存配方会保留执行测量所需的所有配置。相同物料再次测量时，只需加载配方、更新必要的产品/设备信息，然后按流程继续。")
+        hint.setWordWrap(True)
+        hint.setObjectName("statusCaption")
+        layout.addWidget(hint)
+        layout.addStretch(1)
+        return w
 
-        fit_section = CollapsibleSection("ROI 参数", True)
-        group_fit = QGroupBox("ROI 参数")
-        form_fit = QFormLayout(group_fit)
-        self.fit_mode_combo = SidebarComboBox()
-        self.fit_mode_combo.addItem("边缘中心（默认）", "EdgeCenter")
-        self.fit_mode_combo.addItem("自动", "Auto")
-        self.fit_mode_combo.addItem("圆", "Circle")
-        self.fit_mode_combo.addItem("椭圆", "Ellipse")
-        self.fit_mode_combo.addItem("矩形/方孔", "Rectangle")
-        self.upper_fit_mode_combo = SidebarComboBox()
-        self.upper_fit_mode_combo.addItem("边缘中心（默认）", "EdgeCenter")
-        self.upper_fit_mode_combo.addItem("自动", "Auto")
-        self.upper_fit_mode_combo.addItem("圆", "Circle")
-        self.upper_fit_mode_combo.addItem("椭圆", "Ellipse")
-        self.upper_fit_mode_combo.addItem("矩形/方孔", "Rectangle")
-        self.lower_fit_mode_combo = SidebarComboBox()
-        self.lower_fit_mode_combo.addItem("边缘中心（默认）", "EdgeCenter")
-        self.lower_fit_mode_combo.addItem("自动", "Auto")
-        self.lower_fit_mode_combo.addItem("圆", "Circle")
-        self.lower_fit_mode_combo.addItem("椭圆", "Ellipse")
-        self.lower_fit_mode_combo.addItem("矩形/方孔", "Rectangle")
-        form_fit.addRow("默认识别方式", self.fit_mode_combo)
-        form_fit.addRow("上层识别方式", self.upper_fit_mode_combo)
-        form_fit.addRow("下层识别方式", self.lower_fit_mode_combo)
+    def _build_image_tab(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        group = QGroupBox("图像导入")
+        form = QFormLayout(group)
+        self.image_mode_tip_label = QLabel("请在图像区上方选择：单图模式 / 双图模式")
+        self.upper_file_label = QLabel("未导入")
+        self.lower_file_label = QLabel("未导入")
+        for label in (self.image_mode_tip_label, self.upper_file_label, self.lower_file_label):
+            label.setObjectName("statusCaption")
+            label.setWordWrap(True)
+        form.addRow("图像模式", self.image_mode_tip_label)
+        form.addRow("上层/单图文件", self.upper_file_label)
+        form.addRow("下层图像文件", self.lower_file_label)
+        form.addRow("导入说明", QLabel("请使用顶部工具栏导入上层/单图和下层图像。"))
+        note = QLabel("单图模式：只导入单张图像；双图模式：分别导入上层物料图像和下层物料图像。")
+        note.setWordWrap(True)
+        note.setObjectName("statusCaption")
+        form.addRow(note)
+        layout.addWidget(group)
 
-        group_rz = QGroupBox("Mark 分布 / Rz")
-        form_rz = QFormLayout(group_rz)
-        self.rz_layout_combo = SidebarComboBox()
-        self.rz_layout_combo.addItems(["Y向前后分布", "X向左右分布"])
-        self.rz_l_spin = SidebarDoubleSpinBox()
-        self.rz_l_spin.setRange(0.000001, 1000000000)
-        self.rz_l_spin.setDecimals(6)
-        self.rz_l_spin.setSingleStep(100.0)
-        self.rz_l_spin.setValue(1.0)
-        self.rz_limit_spin = SidebarDoubleSpinBox()
-        self.rz_limit_spin.setRange(0, 1000000000)
-        self.rz_limit_spin.setDecimals(6)
-        self.rz_limit_spin.setSingleStep(0.001)
-        self.rz_limit_spin.setValue(999999.0)
-        form_rz.addRow("Mark分布方向", self.rz_layout_combo)
-        form_rz.addRow("Mark间距 L (μm)", self.rz_l_spin)
-        form_rz.addRow("|Rz| 上限", self.rz_limit_spin)
+        batch_group = QGroupBox("批量测量导入")
+        batch_layout = QVBoxLayout(batch_group)
+        batch_form = QFormLayout()
+        self.measurement_run_mode_combo = SidebarComboBox()
+        self.measurement_run_mode_combo.addItem("单次测量", "Single")
+        self.measurement_run_mode_combo.addItem("批量测量", "Batch")
+        self.batch_count_spin = SidebarSpinBox()
+        self.batch_count_spin.setRange(1, 99)
+        self.batch_count_spin.setValue(3)
+        batch_form.addRow("测量方式", self.measurement_run_mode_combo)
+        batch_form.addRow("预计重复次数", self.batch_count_spin)
+        batch_layout.addLayout(batch_form)
+        btn_row1 = QHBoxLayout()
+        self.batch_import_mark1_upper_btn = QPushButton("导入 Mark1 上层/单图")
+        self.batch_import_mark1_lower_btn = QPushButton("导入 Mark1 下层")
+        btn_row1.addWidget(self.batch_import_mark1_upper_btn)
+        btn_row1.addWidget(self.batch_import_mark1_lower_btn)
+        btn_row2 = QHBoxLayout()
+        self.batch_import_mark2_upper_btn = QPushButton("导入 Mark2 上层/单图")
+        self.batch_import_mark2_lower_btn = QPushButton("导入 Mark2 下层")
+        btn_row2.addWidget(self.batch_import_mark2_upper_btn)
+        btn_row2.addWidget(self.batch_import_mark2_lower_btn)
+        self.batch_clear_btn = QPushButton("清空批量图像")
+        batch_layout.addLayout(btn_row1)
+        batch_layout.addLayout(btn_row2)
+        batch_layout.addWidget(self.batch_clear_btn)
+        self.batch_image_table = QTableWidget()
+        batch_layout.addWidget(self.batch_image_table)
+        batch_note = QLabel("批量测量会复用当前 Mark 的 ROI 模板和算法参数；点击顶部“计算对位偏差”后会自动计算所有已导入重复测量。")
+        batch_note.setWordWrap(True)
+        batch_note.setObjectName("statusCaption")
+        batch_layout.addWidget(batch_note)
+        layout.addWidget(batch_group)
+        layout.addStretch(1)
+        return w
 
-        group_roi = QGroupBox("ROI 参数")
+    def _build_roi_tab(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        group_mark = QGroupBox("当前 Mark")
+        form_mark = QFormLayout(group_mark)
+        self.mark_combo = SidebarComboBox()
+        self.layer_combo = SidebarComboBox()
+        self.layer_combo.addItem("上层", "upper")
+        self.layer_combo.addItem("下层", "lower")
+        form_mark.addRow("Mark编号", self.mark_combo)
+        form_mark.addRow("当前层", self.layer_combo)
+        layout.addWidget(group_mark)
+
+        group_auto = QGroupBox("ROI 设置方式")
+        form_auto = QFormLayout(group_auto)
+        self.workflow_combo = SidebarComboBox()
+        self.workflow_combo.addItem("手动 ROI 测量", "Manual")
+        self.workflow_combo.addItem("自动识别测量", "Auto")
+        self.auto_detect_btn = QPushButton("自动识别当前 Mark")
+        self.auto_reference_combo = SidebarComboBox()
+        self.auto_target_combo = SidebarComboBox()
+        self.auto_calculate_btn = QPushButton("计算所选轮廓对位偏差")
+        self.auto_calculate_btn.setVisible(False)
+        self.diagnostic_check = QCheckBox("显示诊断信息（原始轮廓 / 边缘点）")
+        self.production_status_label = QLabel("自动模式：正式精测结果")
+        form_auto.addRow("工作方式", self.workflow_combo)
+        form_auto.addRow(self.auto_detect_btn)
+        form_auto.addRow("当前 Mark 基准轮廓", self.auto_reference_combo)
+        form_auto.addRow("当前 Mark 待测轮廓", self.auto_target_combo)
+        form_auto.addRow(self.diagnostic_check)
+        form_auto.addRow(self.production_status_label)
+        layout.addWidget(group_auto)
+
+        roi_section = CollapsibleSection("环形 ROI 参数", True)
+        group_roi = QGroupBox("环形 ROI 参数")
         form_roi = QFormLayout(group_roi)
         self.roi_type_combo = SidebarComboBox()
+        self.roi_type_combo.addItem("矩形区域", "Rectangle")
+        self.roi_type_combo.addItem("圆形区域", "Circle")
         self.roi_type_combo.addItem("卡尺圆", "Caliper Circle")
         self.roi_type_combo.addItem("圆环区域", "Annulus")
         self.roi_type_combo.addItem("矩形环区域", "Rectangular Ring")
@@ -1773,16 +1721,22 @@ class MainWindow(QMainWindow):
         form_roi.addRow("矩形环角度", self.roi_angle_spin)
         form_roi.addRow(self.three_point_circle_btn)
         form_roi.addRow(self.apply_roi_params_btn)
-        fit_section.add_widget(group_roi)
-        measurement_detail_section = CollapsibleSection("识别方式与 Rz", False)
-        measurement_detail_section.add_widget(group_fit)
-        measurement_detail_section.add_widget(group_rz)
-        fit_section.add_widget(measurement_detail_section)
-        layout.addWidget(fit_section)
+        roi_section.add_widget(group_roi)
+        layout.addWidget(roi_section)
 
-        offset_section = CollapsibleSection("配准与尺寸", False)
-        group2 = QGroupBox("配准与尺寸")
-        form2 = QFormLayout(group2)
+        hint = QLabel("自动识别测量：先点击自动识别当前 Mark，再选择基准轮廓和待测轮廓。手动 ROI 测量：先框选并分析 ROI，再在下拉框中选择基准轮廓和待测轮廓。")
+        hint.setWordWrap(True)
+        hint.setObjectName("statusCaption")
+        layout.addWidget(hint)
+        layout.addStretch(1)
+        return w
+
+    def _build_algo_tab(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+
+        group_size = QGroupBox("像素尺寸与双图配准")
+        form_size = QFormLayout(group_size)
         self.pixel_x_spin = SidebarDoubleSpinBox()
         self.pixel_y_spin = SidebarDoubleSpinBox()
         for spin in (self.pixel_x_spin, self.pixel_y_spin):
@@ -1797,75 +1751,99 @@ class MainWindow(QMainWindow):
             spin.setDecimals(6)
             spin.setSingleStep(0.1)
             spin.setValue(0.0)
-        form2.addRow("像素尺寸 X (μm/px)", self.pixel_x_spin)
-        form2.addRow("像素尺寸 Y (μm/px)", self.pixel_y_spin)
-        form2.addRow("配准偏移 X (μm)", self.offset_x_spin)
-        form2.addRow("配准偏移 Y (μm)", self.offset_y_spin)
-        offset_section.add_widget(group2)
-        layout.addWidget(offset_section)
+        form_size.addRow("像素尺寸 X (μm/px)", self.pixel_x_spin)
+        form_size.addRow("像素尺寸 Y (μm/px)", self.pixel_y_spin)
+        form_size.addRow("配准偏移 X (μm)", self.offset_x_spin)
+        form_size.addRow("配准偏移 Y (μm)", self.offset_y_spin)
+        layout.addWidget(group_size)
 
-        layout.addStretch(1)
-        return w
+        auto_rule_section = CollapsibleSection("自动识别高级规则", False)
+        group_auto_rule = QGroupBox("自动识别高级规则")
+        form_auto_rule = QFormLayout(group_auto_rule)
+        self.auto_ref_shape_combo = SidebarComboBox()
+        self.auto_target_shape_combo = SidebarComboBox()
+        for combo in (self.auto_ref_shape_combo, self.auto_target_shape_combo):
+            combo.addItem("任意", "Any")
+            combo.addItem("圆形", "Circle")
+            combo.addItem("方形", "Rectangle")
+        self.auto_ref_size_min_spin = SidebarDoubleSpinBox()
+        self.auto_ref_size_max_spin = SidebarDoubleSpinBox()
+        self.auto_target_size_min_spin = SidebarDoubleSpinBox()
+        self.auto_target_size_max_spin = SidebarDoubleSpinBox()
+        for spin in (self.auto_ref_size_min_spin, self.auto_ref_size_max_spin, self.auto_target_size_min_spin, self.auto_target_size_max_spin):
+            spin.setRange(0.0, 1000000000.0)
+            spin.setDecimals(6)
+        self.auto_ref_size_max_spin.setValue(999999.0)
+        self.auto_target_size_max_spin.setValue(999999.0)
+        form_auto_rule.addRow("基准预期外形", self.auto_ref_shape_combo)
+        form_auto_rule.addRow("基准尺寸下限 (μm)", self.auto_ref_size_min_spin)
+        form_auto_rule.addRow("基准尺寸上限 (μm)", self.auto_ref_size_max_spin)
+        form_auto_rule.addRow("待测预期外形", self.auto_target_shape_combo)
+        form_auto_rule.addRow("待测尺寸下限 (μm)", self.auto_target_size_min_spin)
+        form_auto_rule.addRow("待测尺寸上限 (μm)", self.auto_target_size_max_spin)
+        auto_rule_section.add_widget(group_auto_rule)
+        layout.addWidget(auto_rule_section)
 
-    def _build_algo_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        algo_section = CollapsibleSection("高级参数", False)
-        group = QGroupBox("高级参数")
+        fit_section = CollapsibleSection("常用拟合设置", False)
+        group_fit = QGroupBox("常用拟合设置")
+        form_fit = QFormLayout(group_fit)
+        self.fit_mode_combo = SidebarComboBox()
+        self.fit_mode_combo.addItem("稳健中心（推荐）", "EdgeCenter")
+        self.fit_mode_combo.addItem("区域中心", "RegionCenter")
+        self.fit_mode_combo.addItem("自动识别", "Auto")
+        self.fit_mode_combo.addItem("圆拟合", "Circle")
+        self.fit_mode_combo.addItem("椭圆拟合", "Ellipse")
+        self.fit_mode_combo.addItem("矩形拟合", "Rectangle")
+        self.upper_fit_mode_combo = SidebarComboBox()
+        self.lower_fit_mode_combo = SidebarComboBox()
+        for combo in (self.upper_fit_mode_combo, self.lower_fit_mode_combo):
+            combo.addItem("稳健中心（推荐）", "EdgeCenter")
+            combo.addItem("区域中心", "RegionCenter")
+            combo.addItem("自动识别", "Auto")
+            combo.addItem("圆拟合", "Circle")
+            combo.addItem("椭圆拟合", "Ellipse")
+            combo.addItem("矩形拟合", "Rectangle")
+        form_fit.addRow("默认识别方式", self.fit_mode_combo)
+        form_fit.addRow("上层识别方式", self.upper_fit_mode_combo)
+        form_fit.addRow("下层识别方式", self.lower_fit_mode_combo)
+        fit_section.add_widget(group_fit)
+        layout.addWidget(fit_section)
+
+        rz_section = CollapsibleSection("Mark 分布与 Rz", False)
+        group_rz = QGroupBox("Mark 分布 / Rz")
+        form_rz = QFormLayout(group_rz)
+        self.rz_layout_combo = SidebarComboBox()
+        self.rz_layout_combo.addItems(["Y向前后分布", "X向左右分布"])
+        self.rz_l_spin = SidebarDoubleSpinBox()
+        self.rz_l_spin.setRange(0.000001, 1000000000)
+        self.rz_l_spin.setDecimals(6)
+        self.rz_l_spin.setSingleStep(100.0)
+        self.rz_l_spin.setValue(1.0)
+        self.rz_limit_spin = SidebarDoubleSpinBox()
+        self.rz_limit_spin.setRange(0, 1000000000)
+        self.rz_limit_spin.setDecimals(6)
+        self.rz_limit_spin.setSingleStep(0.001)
+        self.rz_limit_spin.setValue(999999.0)
+        form_rz.addRow("Mark分布方向", self.rz_layout_combo)
+        form_rz.addRow("Mark间距 L (μm)", self.rz_l_spin)
+        form_rz.addRow("|Rz| 上限 (μrad)", self.rz_limit_spin)
+        rz_section.add_widget(group_rz)
+        layout.addWidget(rz_section)
+
+        advanced_section = CollapsibleSection("亚像素与正式精测参数", False)
+        group = QGroupBox("亚像素算法")
         form = QFormLayout(group)
-
-        self.sigma_spin = SidebarDoubleSpinBox()
-        self.sigma_spin.setRange(0, 10)
-        self.sigma_spin.setDecimals(3)
-        self.sigma_spin.setSingleStep(0.1)
-        self.sigma_spin.setValue(1.0)
-
-        self.canny_low_spin = SidebarDoubleSpinBox()
-        self.canny_high_spin = SidebarDoubleSpinBox()
+        self.sigma_spin = SidebarDoubleSpinBox(); self.sigma_spin.setRange(0, 10); self.sigma_spin.setDecimals(3); self.sigma_spin.setSingleStep(0.1); self.sigma_spin.setValue(1.0)
+        self.canny_low_spin = SidebarDoubleSpinBox(); self.canny_high_spin = SidebarDoubleSpinBox()
         for spin, val in [(self.canny_low_spin, 40), (self.canny_high_spin, 120)]:
-            spin.setRange(0, 255)
-            spin.setDecimals(1)
-            spin.setSingleStep(5)
-            spin.setValue(val)
-
-        self.min_gradient_spin = SidebarDoubleSpinBox()
-        self.min_gradient_spin.setRange(0, 1000000)
-        self.min_gradient_spin.setDecimals(3)
-        self.min_gradient_spin.setSingleStep(1)
-        self.min_gradient_spin.setValue(5.0)
-
-        self.profile_half_spin = SidebarDoubleSpinBox()
-        self.profile_half_spin.setRange(0.5, 10)
-        self.profile_half_spin.setDecimals(2)
-        self.profile_half_spin.setSingleStep(0.25)
-        self.profile_half_spin.setValue(2.0)
-
-        self.profile_step_spin = SidebarDoubleSpinBox()
-        self.profile_step_spin.setRange(0.05, 2)
-        self.profile_step_spin.setDecimals(3)
-        self.profile_step_spin.setSingleStep(0.05)
-        self.profile_step_spin.setValue(0.25)
-
-        self.ransac_check = QCheckBox("启用 RANSAC 异常点剔除")
-        self.ransac_check.setChecked(True)
-
-        self.residual_limit_spin = SidebarDoubleSpinBox()
-        self.residual_limit_spin.setRange(0.001, 1000)
-        self.residual_limit_spin.setDecimals(4)
-        self.residual_limit_spin.setSingleStep(0.05)
-        self.residual_limit_spin.setValue(2.0)
-
-        self.min_edge_points_spin = SidebarSpinBox()
-        self.min_edge_points_spin.setRange(3, 1000000)
-        self.min_edge_points_spin.setValue(60)
-
-        self.polarity_combo = SidebarComboBox()
-        self.polarity_combo.addItem("自动", "Auto")
-        self.polarity_combo.addItem("暗到亮", "Dark to Bright")
-        self.polarity_combo.addItem("亮到暗", "Bright to Dark")
-
+            spin.setRange(0, 255); spin.setDecimals(1); spin.setSingleStep(5); spin.setValue(val)
+        self.min_gradient_spin = SidebarDoubleSpinBox(); self.min_gradient_spin.setRange(0, 1000000); self.min_gradient_spin.setDecimals(3); self.min_gradient_spin.setSingleStep(1); self.min_gradient_spin.setValue(5.0)
+        self.profile_half_spin = SidebarDoubleSpinBox(); self.profile_half_spin.setRange(0.5, 10); self.profile_half_spin.setDecimals(2); self.profile_half_spin.setSingleStep(0.25); self.profile_half_spin.setValue(2.0)
+        self.profile_step_spin = SidebarDoubleSpinBox(); self.profile_step_spin.setRange(0.05, 2); self.profile_step_spin.setDecimals(3); self.profile_step_spin.setSingleStep(0.05); self.profile_step_spin.setValue(0.25)
+        self.ransac_check = QCheckBox("启用 RANSAC 异常点剔除"); self.ransac_check.setChecked(True)
+        self.residual_limit_spin = SidebarDoubleSpinBox(); self.residual_limit_spin.setRange(0.001, 1000); self.residual_limit_spin.setDecimals(4); self.residual_limit_spin.setSingleStep(0.05); self.residual_limit_spin.setValue(2.0)
+        self.min_edge_points_spin = SidebarSpinBox(); self.min_edge_points_spin.setRange(3, 1000000); self.min_edge_points_spin.setValue(60)
+        self.polarity_combo = SidebarComboBox(); self.polarity_combo.addItem("自动", "Auto"); self.polarity_combo.addItem("暗到亮", "Dark to Bright"); self.polarity_combo.addItem("亮到暗", "Bright to Dark")
         form.addRow("高斯滤波 Sigma (px)", self.sigma_spin)
         form.addRow("Canny 低阈值", self.canny_low_spin)
         form.addRow("Canny 高阈值", self.canny_high_spin)
@@ -1876,69 +1854,41 @@ class MainWindow(QMainWindow):
         form.addRow("RANSAC剔除阈值 (px)", self.residual_limit_spin)
         form.addRow("最少边缘点数", self.min_edge_points_spin)
         form.addRow("边缘极性", self.polarity_combo)
-        algo_section.add_widget(group)
-        layout.addWidget(algo_section)
-
-        production_section = CollapsibleSection("正式精测参数", False)
-        production_group = QGroupBox("正式精测参数")
+        advanced_section.add_widget(group)
+        production_group = QGroupBox("自动正式精测 / 质量门槛")
         production_form = QFormLayout(production_group)
-        self.production_search_spin = SidebarDoubleSpinBox()
-        self.production_search_spin.setRange(2.0, 1000.0)
-        self.production_search_spin.setDecimals(3)
-        self.production_search_spin.setValue(8.0)
-        self.production_coverage_spin = SidebarDoubleSpinBox()
-        self.production_coverage_spin.setRange(0.0, 1.0)
-        self.production_coverage_spin.setDecimals(3)
-        self.production_coverage_spin.setValue(0.65)
-        self.production_reject_spin = SidebarDoubleSpinBox()
-        self.production_reject_spin.setRange(0.0, 1.0)
-        self.production_reject_spin.setDecimals(3)
-        self.production_reject_spin.setValue(0.40)
-        self.production_residual_spin = SidebarDoubleSpinBox()
-        self.production_residual_spin.setRange(0.000001, 1000000.0)
-        self.production_residual_spin.setDecimals(6)
-        self.production_residual_spin.setValue(0.30)
-        self.production_deviation_spin = SidebarDoubleSpinBox()
-        self.production_deviation_spin.setRange(0.000001, 1000000.0)
-        self.production_deviation_spin.setDecimals(6)
-        self.production_deviation_spin.setValue(0.60)
+        self.production_search_spin = SidebarDoubleSpinBox(); self.production_search_spin.setRange(2.0, 1000.0); self.production_search_spin.setDecimals(3); self.production_search_spin.setValue(8.0)
+        self.production_coverage_spin = SidebarDoubleSpinBox(); self.production_coverage_spin.setRange(0.0, 1.0); self.production_coverage_spin.setDecimals(3); self.production_coverage_spin.setValue(0.65)
+        self.production_reject_spin = SidebarDoubleSpinBox(); self.production_reject_spin.setRange(0.0, 1.0); self.production_reject_spin.setDecimals(3); self.production_reject_spin.setValue(0.40)
+        self.production_residual_spin = SidebarDoubleSpinBox(); self.production_residual_spin.setRange(0.000001, 1000000.0); self.production_residual_spin.setDecimals(6); self.production_residual_spin.setValue(0.30)
+        self.production_deviation_spin = SidebarDoubleSpinBox(); self.production_deviation_spin.setRange(0.000001, 1000000.0); self.production_deviation_spin.setDecimals(6); self.production_deviation_spin.setValue(0.60)
         production_form.addRow("自动搜索半宽 (px)", self.production_search_spin)
         production_form.addRow("最低覆盖率", self.production_coverage_spin)
         production_form.addRow("最大异常点比例", self.production_reject_spin)
         production_form.addRow("最大残差 (μm)", self.production_residual_spin)
         production_form.addRow("最大轮廓偏差 (μm)", self.production_deviation_spin)
-        production_section.add_widget(production_group)
-        layout.addWidget(production_section)
+        advanced_section.add_widget(production_group)
+        layout.addWidget(advanced_section)
         layout.addStretch(1)
         return w
 
     def _build_spec_tab(self) -> QWidget:
         w = QWidget()
         layout = QVBoxLayout(w)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        spec_section = CollapsibleSection("规格判定", False)
-        group = QGroupBox("规格判定")
+        group = QGroupBox("判定规格")
         form = QFormLayout(group)
-        self.dx_limit_spin = SidebarDoubleSpinBox()
-        self.dy_limit_spin = SidebarDoubleSpinBox()
-        self.r_limit_spin = SidebarDoubleSpinBox()
-        self.conf_min_spin = SidebarDoubleSpinBox()
+        self.dx_limit_spin = SidebarDoubleSpinBox(); self.dy_limit_spin = SidebarDoubleSpinBox(); self.r_limit_spin = SidebarDoubleSpinBox(); self.conf_min_spin = SidebarDoubleSpinBox()
         for spin, val in [(self.dx_limit_spin, 0.5), (self.dy_limit_spin, 0.5), (self.r_limit_spin, 0.7)]:
-            spin.setRange(0, 1000000)
-            spin.setDecimals(6)
-            spin.setSingleStep(0.1)
-            spin.setValue(val)
-        self.conf_min_spin.setRange(0, 1)
-        self.conf_min_spin.setDecimals(3)
-        self.conf_min_spin.setSingleStep(0.05)
-        self.conf_min_spin.setValue(0.7)
+            spin.setRange(0, 1000000); spin.setDecimals(6); spin.setSingleStep(0.1); spin.setValue(val)
+        self.conf_min_spin.setRange(0, 1); self.conf_min_spin.setDecimals(3); self.conf_min_spin.setSingleStep(0.05); self.conf_min_spin.setValue(0.7)
         form.addRow("|ΔX| 上限 (μm)", self.dx_limit_spin)
         form.addRow("|ΔY| 上限 (μm)", self.dy_limit_spin)
         form.addRow("对位 R 上限 (μm)", self.r_limit_spin)
         form.addRow("最低置信度", self.conf_min_spin)
-        spec_section.add_widget(group)
-        layout.addWidget(spec_section)
+        layout.addWidget(group)
+        note = QLabel("导出的报告格式与 V1.0.5 保持一致。")
+        note.setObjectName("statusCaption")
+        layout.addWidget(note)
         layout.addStretch(1)
         return w
 
@@ -1989,24 +1939,31 @@ class MainWindow(QMainWindow):
         self.apply_roi_params_btn.clicked.connect(self.apply_roi_params_to_current)
         self.upper_canvas.roiChanged.connect(self.set_roi)
         self.lower_canvas.roiChanged.connect(self.set_roi)
-        self.analyze_roi_btn.clicked.connect(self.analyze_current_roi)
+        self.analyze_roi_btn.clicked.connect(self.analyze_roi_regions)
         self.analyze_current_btn.clicked.connect(self.analyze_current_mark)
         self.analyze_all_btn.clicked.connect(self.analyze_all_marks)
         self.export_btn.clicked.connect(self.export_result_file)
         self.save_recipe_btn.clicked.connect(self.save_recipe_file)
         self.load_recipe_btn.clicked.connect(self.load_recipe_file)
-        self.clear_log_btn.clicked.connect(self.log_edit.clear)
-        self.settings_btn.clicked.connect(lambda: self._show_info("设置", "当前版本未提供独立设置页，请在右侧参数区调整分析参数。"))
-        for edit in (
-            self.recipe_name_edit,
-            self.recipe_version_edit,
-            self.material_code_edit,
-            self.process_name_edit,
-            self.equipment_model_edit,
-            self.calibration_date_edit,
-            self.operator_name_edit,
-        ):
-            edit.textChanged.connect(self._refresh_all_widgets)
+        self.batch_import_mark1_upper_btn.clicked.connect(lambda: self.import_batch_images("Mark1", "upper"))
+        self.batch_import_mark1_lower_btn.clicked.connect(lambda: self.import_batch_images("Mark1", "lower"))
+        self.batch_import_mark2_upper_btn.clicked.connect(lambda: self.import_batch_images("Mark2", "upper"))
+        self.batch_import_mark2_lower_btn.clicked.connect(lambda: self.import_batch_images("Mark2", "lower"))
+        self.batch_clear_btn.clicked.connect(self.clear_batch_images)
+        self.measurement_run_mode_combo.currentIndexChanged.connect(self._refresh_all_widgets)
+        self._install_button_feedback()
+
+    def _append_log(self, message: str):
+        # V1.2.5：取消独立日志窗口，所有操作反馈统一显示在左下角状态栏，避免界面拥挤。
+        self.statusBar().showMessage(message, 3500)
+
+    def _install_button_feedback(self):
+        for button in self.findChildren(QPushButton):
+            if button.property("feedback_installed"):
+                continue
+            button.setProperty("feedback_installed", True)
+            button.clicked.connect(lambda checked=False, b=button: self._append_log(f"点击按钮：{b.text().replace('&', '')}"))
+            button.setToolTip(button.toolTip() or f"点击执行：{button.text().replace('&', '')}")
 
     def _pull_config_from_ui(self):
         self.config.mode = self._current_mode()
@@ -2181,13 +2138,31 @@ class MainWindow(QMainWindow):
         return "Annulus"
 
     def _coerce_roi_to_auto_ring(self, roi: Roi, layer: str) -> Roi:
-        return replace(
-            roi,
-            roi_type=self._auto_ring_roi_type(layer),
-            caliper_count=self.caliper_count_spin.value() if hasattr(self, "caliper_count_spin") else getattr(roi, "caliper_count", 64),
-            caliper_width_px=self.caliper_width_spin.value() if hasattr(self, "caliper_width_spin") else getattr(roi, "caliper_width_px", 8.0),
-            search_direction=self._combo_value(self.search_direction_combo) if hasattr(self, "search_direction_combo") else getattr(roi, "search_direction", "Inner to Outer"),
-        )
+        """Return the ROI saved for this layer without overwriting its type.
+
+        Earlier versions forced every saved ROI to the currently selected ROI Type in
+        the side panel. That made mixed-shape measurements fail: for example, when
+        the lower layer used 卡尺圆, the upper square ROI was also coerced to
+        Caliper Circle during one-click calculation, so the square mark was measured
+        as a circle.
+
+        ROI type is now treated as a per-ROI/per-layer property. The side-panel
+        settings only update the active ROI when the user draws/applies ROI
+        parameters; calculation must respect each ROI's own stored type.
+        """
+        if roi is None:
+            return roi
+        # Keep the ROI's own type and geometry. Only normalize missing caliper
+        # parameters for legacy recipes that do not contain these fields.
+        roi_type = getattr(roi, "roi_type", "Rectangle")
+        if roi_type == "Caliper Circle":
+            return replace(
+                roi,
+                caliper_count=int(getattr(roi, "caliper_count", 64) or 64),
+                caliper_width_px=float(getattr(roi, "caliper_width_px", 8.0) or 8.0),
+                search_direction=getattr(roi, "search_direction", "Inner to Outer") or "Inner to Outer",
+            )
+        return roi
 
     def on_active_roi_selection_changed(self, *args):
         if hasattr(self, "three_point_circle_btn") and self.three_point_circle_btn.isChecked():
@@ -2288,18 +2263,18 @@ class MainWindow(QMainWindow):
         current_mark = self.mark_combo.currentText() or "Mark1"
         current_layer = self._current_layer()
         is_dual = self._current_mode() == "Dual Image"
-        self.import_upper_btn.setText("导入图像" if not is_dual else "导入上层图像")
-        self.import_lower_btn.setText("导入下层")
-        self.upper_canvas.title = "Upper Image" if is_dual else "Image"
-        self.lower_canvas.title = "Lower Image"
+        self.import_upper_btn.setText("📂 导入上层/单图")
+        self.import_lower_btn.setText("📁 导入下层图像")
+        self.upper_canvas.title = "上层图像" if is_dual else "单图图像"
+        self.lower_canvas.title = "下层图像"
         if hasattr(self, "upper_image_card"):
-            self.upper_image_card.title_label.setText("Upper Image" if is_dual else "Image")
+            self.upper_image_card.title_label.setText(self.upper_canvas.title)
         if hasattr(self, "lower_image_card"):
-            self.lower_image_card.title_label.setText("Lower Image")
+            self.lower_image_card.title_label.setText(self.lower_canvas.title)
         if self.upper_canvas.image is None:
-            self.upper_canvas.setText(f"{self.upper_canvas.title}\n等待导入图像")
+            self.upper_canvas.setText("等待导入图像")
         if self.lower_canvas.image is None:
-            self.lower_canvas.setText(f"{self.lower_canvas.title}\n等待导入图像")
+            self.lower_canvas.setText("等待导入图像")
         self.upper_canvas.fixed_layer = None if not is_dual else "upper"
         upper_layer = "upper" if is_dual else current_layer
         lower_layer = "lower"
@@ -2322,19 +2297,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, "production_status_label"):
             self.production_status_label.setText(
                 "正式测量 / 已验证配方" if is_validated_recipe else "试测 / 未验证配方（不作正式判定）"
-            )
-        if hasattr(self, "current_recipe_label"):
-            recipe_name = self.recipe_name_edit.text().strip() if hasattr(self, "recipe_name_edit") else ""
-            self.current_recipe_label.setText(f"Recipe: {recipe_name or '未加载'}")
-        if hasattr(self, "overlay_definition_value"):
-            self.overlay_definition_value.setText("上层 - 下层")
-        if hasattr(self, "mode_hint_label"):
-            self.mode_hint_label.setText(self.mode_combo.currentText())
-        if hasattr(self, "pixel_size_summary_label"):
-            self.pixel_size_summary_label.setText(f"{self.config.pixel_size_x_um:.3f} μm/px")
-        if hasattr(self, "image_status_label"):
-            self.image_status_label.setText(
-                "正在离线分析" if show_auto and current_auto_detections else "拖动 ROI 或调整参数后开始分析"
             )
         manual_labels = self._manual_detection_labels()
         reference_label = self.auto_reference_combo.currentData() or "" if hasattr(self, "auto_reference_combo") else ""
@@ -2387,26 +2349,48 @@ class MainWindow(QMainWindow):
         if hasattr(self, "lower_image_card"):
             self.lower_image_card.setVisible(is_dual)
         self.import_lower_btn.setEnabled(is_dual)
-        self.import_lower_btn.setVisible(is_dual)
         self.auto_detect_btn.setEnabled(show_auto)
-        self.auto_reference_combo.setEnabled(show_auto)
-        self.auto_target_combo.setEnabled(show_auto)
-        if hasattr(self, "auto_workflow_panel"):
-            self.auto_workflow_panel.setVisible(show_auto)
+        # 基准/待测轮廓选择在自动识别和手动 ROI 两种工作方式下都需要可用。
+        self.auto_reference_combo.setEnabled(True)
+        self.auto_target_combo.setEnabled(True)
         auto_reference = self.auto_reference_combo.currentData()
         auto_target = self.auto_target_combo.currentData()
         self.auto_calculate_btn.setEnabled(
-            show_auto and bool(auto_reference) and bool(auto_target) and auto_reference != auto_target
+            bool(auto_reference) and bool(auto_target) and auto_reference != auto_target
         )
         self.analyze_roi_btn.setEnabled(not show_auto)
         self.analyze_current_btn.setEnabled(not show_auto)
-        self.analyze_all_btn.setEnabled(not show_auto)
+        self.analyze_all_btn.setEnabled(True)
         self.three_point_circle_btn.setEnabled(not show_auto)
         self.apply_roi_params_btn.setEnabled(not show_auto)
         self._refresh_mark_combo()
+        if hasattr(self, "current_recipe_label"):
+            self.current_recipe_label.setText(f"当前配方：{self.recipe_name_edit.text().strip() or '未加载'}")
+        if hasattr(self, "workflow_recipe_label"):
+            self.workflow_recipe_label.setText(f"当前配方：{self.recipe_name_edit.text().strip() or '未加载'}")
+        if hasattr(self, "image_status_label"):
+            if self.upper_image is None:
+                self.image_status_label.setText("等待导入图像")
+            elif is_dual and self.lower_image is None:
+                self.image_status_label.setText("等待导入下层图像")
+            elif (self.auto_overlays if show_auto else self.overlays):
+                self.image_status_label.setText("离线分析完成")
+            else:
+                self.image_status_label.setText("图像已加载，可分析 ROI 区域或计算对位偏差")
+        if hasattr(self, "upper_file_label"):
+            upper_img = self._image_for_layer("upper", current_mark)
+            lower_img = self._image_for_layer("lower", current_mark)
+            self.upper_file_label.setText(Path(upper_img.path).name if upper_img and upper_img.path else "未导入")
+            self.lower_file_label.setText(Path(lower_img.path).name if lower_img and lower_img.path else "未导入")
+            if hasattr(self, "image_mode_tip_label"):
+                self.image_mode_tip_label.setText(self.mode_combo.currentText())
         self._refresh_tables()
-        self._refresh_summary_cards()
-        self._refresh_step_status(current_mark, show_auto)
+        self._refresh_batch_image_table()
+        self._refresh_repeatability_table()
+        if hasattr(self, "_refresh_summary_cards"):
+            self._refresh_summary_cards()
+        if hasattr(self, "_refresh_step_status"):
+            self._refresh_step_status(current_mark, show_auto)
 
     def _refresh_mark_combo(self):
         self.marks = {
@@ -2462,88 +2446,6 @@ class MainWindow(QMainWindow):
         layer_map = self.auto_detections_by_mark.get(mark_id, {}).get(label, {})
         return next(iter(layer_map.values()), None)
 
-    def _set_result_card(self, value_label: QLabel, unit_label: QLabel, value: str, unit: str, color: str = "#1D1D1F"):
-        value_label.setText(value)
-        value_label.setStyleSheet(f"color: {color};")
-        unit_label.setText(unit)
-
-    def _refresh_summary_cards(self):
-        summary_rows = self._build_summary_rows()
-        if summary_rows:
-            first = next((row for row in summary_rows if row.get("项目") in {"Mark1", "Mark2"}), None)
-            if first:
-                dx_key = next((key for key in first if key.startswith("Dx")), "")
-                dy_key = next((key for key in first if key.startswith("Dy")), "")
-                dxy_key = next((key for key in first if key.startswith("Dxy")), "")
-                dx = first.get(dx_key, 0.0)
-                dy = first.get(dy_key, 0.0)
-                dxy = first.get(dxy_key, 0.0)
-                verdict = first.get("判定", "--")
-                verdict_color = "#34C759" if verdict == "通过" else ("#FF3B30" if verdict == "失败" else "#FFCC00")
-                self._set_result_card(self.dx_value_label, self.dx_unit_label, f"{dx:+.3f}", "μm", "#007AFF")
-                self._set_result_card(self.dy_value_label, self.dy_unit_label, f"{dy:+.3f}", "μm", "#FF9500")
-                self._set_result_card(self.r_value_label, self.r_unit_label, f"{dxy:.3f}", "μm", "#1D1D1F")
-                self._set_result_card(self.result_value_label, self.result_unit_label, verdict, first.get("提示", "") or "离线分析状态", verdict_color)
-                return
-        self._set_result_card(self.dx_value_label, self.dx_unit_label, "--", "μm", "#007AFF")
-        self._set_result_card(self.dy_value_label, self.dy_unit_label, "--", "μm", "#FF9500")
-        self._set_result_card(self.r_value_label, self.r_unit_label, "--", "μm")
-        self._set_result_card(self.result_value_label, self.result_unit_label, "等待分析", "离线分析状态", "#6E6E73")
-
-    def _refresh_step_status(self, current_mark: str, show_auto: bool):
-        imported = self._image_for_layer("upper", current_mark) is not None
-        if self._current_mode() == "Dual Image":
-            imported = imported and self._image_for_layer("lower", current_mark) is not None
-        roi_ready = False
-        mark = self.marks.get(current_mark)
-        if mark:
-            roi_ready = mark.upper_roi is not None or mark.lower_roi is not None
-        result_ready = current_mark in (self.auto_overlays if show_auto else self.overlays)
-        steps = [
-            ("完成" if imported else "待处理", "图像已加载" if imported else "等待导入图像"),
-            ("完成" if roi_ready or show_auto else "待处理", "ROI 已设置" if roi_ready else ("自动识别模式" if show_auto else "等待设置 ROI")),
-            ("当前" if imported else "待处理", "参数可调整" if imported else "导入图像后可调整"),
-            ("完成" if result_ready else "待处理", "分析结果已生成" if result_ready else "等待分析结果"),
-            ("完成" if result_ready else "待处理", "可导出报告" if result_ready else "分析完成后可导出"),
-        ]
-        colors = {
-            "待处理": "#A1A1A6",
-            "当前": "#007AFF",
-            "完成": "#34C759",
-            "警告": "#FFCC00",
-            "异常": "#FF3B30",
-        }
-        for index, (row, dot, label, note, state_dot) in enumerate(self.step_rows):
-            state, detail = steps[index]
-            bg = "#FFFFFF" if state == "待处理" else ("#EAF2FF" if state == "当前" else "#EDF9F0")
-            border = colors["当前"] if state == "当前" else ("#D1D5DB" if state == "待处理" else colors["完成"])
-            row.setStyleSheet(
-                "background: %s; border-left: 4px solid %s; border-radius: 10px;" %
-                ("#F8FAFD" if state == "当前" else "transparent", colors["当前"] if state == "当前" else "transparent")
-            )
-            dot.setStyleSheet(
-                f"color: {colors[state]}; font-size: 12px; font-weight: 700; "
-                f"border: 1px solid {border}; border-radius: 14px; background: {bg};"
-            )
-            label.setStyleSheet(
-                "color: #1D1D1F; font-weight: 600; padding-left: 8px; border-left: 3px solid %s;" %
-                (colors["当前"] if state == "当前" else "transparent")
-            )
-            note.setText(detail)
-            state_dot.setStyleSheet(f"color: {colors['完成'] if state == '完成' else '#C7CBD3'}; font-size: 11px;")
-        if not imported:
-            status_text, status_color = "等待导入图像", "#A1A1A6"
-        elif result_ready:
-            status_text, status_color = ("离线分析完成", "#34C759")
-        elif show_auto:
-            status_text, status_color = ("正在离线分析" if self.auto_detections_by_mark.get(current_mark) else "图像已加载", "#007AFF" if self.auto_detections_by_mark.get(current_mark) else "#34C759")
-        else:
-            status_text, status_color = ("图像已加载", "#34C759")
-        self.workflow_status_dot.setStyleSheet(f"color: {status_color}; font-size: 14px;")
-        self.workflow_status_label.setText(status_text)
-        recipe_name = self.recipe_name_edit.text().strip() if hasattr(self, "recipe_name_edit") else ""
-        self.workflow_recipe_label.setText(f"Recipe: {recipe_name or '未加载'}")
-
     def _build_summary_rows(self):
         rows = []
         deltas = {}
@@ -2572,7 +2474,7 @@ class MainWindow(QMainWindow):
                 f"Dx{idx}(μm)": dx,
                 f"Dy{idx}(μm)": dy,
                 f"Dxy{idx}(μm)": dxy,
-                "判定": "试测" if is_trial else ("失败" if warnings else "通过"),
+                "判定": "试测" if is_trial else ("不通过" if warnings else "通过"),
                 "提示": "未验证配方，不作正式判定" if is_trial else "；".join(warnings),
             })
 
@@ -2581,25 +2483,85 @@ class MainWindow(QMainWindow):
             dx2, dy2 = deltas["Mark2"]
             l_value = max(self.config.rz_distance_l_um, 1e-12)
             if self.config.rz_layout == "Y向前后分布":
-                rz = (dx2 - dx1) / l_value
+                rz_rad = (dx2 - dx1) / l_value
                 formula = "Rz=(Dx2-Dx1)/L"
             else:
-                rz = (dy2 - dy1) / l_value
+                rz_rad = (dy2 - dy1) / l_value
                 formula = "Rz=(Dy2-Dy1)/L"
+            rz_urad = rz_rad * 1_000_000.0
             rows.append({
                 "项目": "Rz",
-                "Rz": rz,
+                "Rz(μrad)": rz_urad,
                 "公式": formula,
                 "L(μm)": l_value,
-                "判定": "试测" if self._is_auto_workflow() and self.config.recipe_validation_status != "Validated" else ("失败" if abs(rz) > self.config.rz_limit else "通过"),
-                "提示": "未验证配方，不作正式判定" if self._is_auto_workflow() and self.config.recipe_validation_status != "Validated" else ("Rz超限" if abs(rz) > self.config.rz_limit else ""),
+                "判定": "试测" if self._is_auto_workflow() and self.config.recipe_validation_status != "Validated" else ("不通过" if abs(rz_urad) > self.config.rz_limit else "通过"),
+                "提示": "未验证配方，不作正式判定" if self._is_auto_workflow() and self.config.recipe_validation_status != "Validated" else ("Rz超限" if abs(rz_urad) > self.config.rz_limit else ""),
             })
         return rows
+
+
+    def _set_result_card(self, value_label: QLabel, unit_label: QLabel, value: str, unit: str, color: str = "#1D1D1F"):
+        value_label.setText(value)
+        value_label.setStyleSheet(f"color: {color};")
+        unit_label.setText(unit)
+
+    def _refresh_summary_cards(self):
+        rows = self._build_summary_rows()
+        first = next((row for row in rows if row.get("项目") in {"Mark1", "Mark2"}), None)
+        if first:
+            dx_key = next((key for key in first if key.startswith("Dx")), "")
+            dy_key = next((key for key in first if key.startswith("Dy")), "")
+            dxy_key = next((key for key in first if key.startswith("Dxy")), "")
+            dx = float(first.get(dx_key, 0.0))
+            dy = float(first.get(dy_key, 0.0))
+            dxy = float(first.get(dxy_key, 0.0))
+            verdict = first.get("判定", "--")
+            color = "#34C759" if verdict == "通过" else ("#FF3B30" if verdict == "不通过" else "#FFCC00")
+            self._set_result_card(self.dx_value_label, self.dx_unit_label, f"{dx:+.3f}", "μm", "#007AFF")
+            self._set_result_card(self.dy_value_label, self.dy_unit_label, f"{dy:+.3f}", "μm", "#FF9500")
+            self._set_result_card(self.r_value_label, self.r_unit_label, f"{dxy:.3f}", "μm")
+            self._set_result_card(self.result_value_label, self.result_unit_label, verdict, first.get("提示", "") or "离线分析状态", color)
+            return
+        self._set_result_card(self.dx_value_label, self.dx_unit_label, "--", "μm", "#007AFF")
+        self._set_result_card(self.dy_value_label, self.dy_unit_label, "--", "μm", "#FF9500")
+        self._set_result_card(self.r_value_label, self.r_unit_label, "--", "μm")
+        self._set_result_card(self.result_value_label, self.result_unit_label, "待分析", "离线分析状态", "#6E6E73")
+
+    def _refresh_step_status(self, current_mark: str, show_auto: bool):
+        imported = self._image_for_layer("upper", current_mark) is not None
+        if self._current_mode() == "Dual Image":
+            imported = imported and self._image_for_layer("lower", current_mark) is not None
+        mark = self.marks.get(current_mark)
+        roi_ready = bool(mark and (mark.upper_roi is not None or mark.lower_roi is not None))
+        result_ready = current_mark in (self.auto_overlays if show_auto else self.overlays)
+        states = [
+            ("完成", "信息可编辑"),
+            ("完成" if imported else "当前", "图像已加载" if imported else "等待导入图像"),
+            ("完成" if roi_ready or show_auto else ("当前" if imported else "待处理"), "ROI 已设置" if roi_ready else ("自动识别模式" if show_auto else "等待设置 ROI")),
+            ("完成" if imported else "待处理", "参数已就绪" if imported else "导入图像后设置"),
+            ("完成" if result_ready else "待处理", "可导出结果" if result_ready else "等待计算"),
+        ]
+        colors = {"待处理": "#A1A1A6", "当前": "#007AFF", "完成": "#34C759", "异常": "#FF3B30"}
+        for idx, (row, dot, label, note, state_dot) in enumerate(self.step_rows):
+            state, detail = states[idx]
+            color = colors[state]
+            dot.setStyleSheet(f"color: {color}; border: 1px solid {color}; border-radius: 13px; font-weight: 700; background: #FFFFFF;")
+            label.setStyleSheet(f"font-weight: 600; color: {'#007AFF' if state == '当前' else '#1D1D1F'};")
+            note.setText(detail)
+            state_dot.setStyleSheet(f"color: {color};")
+        if not imported:
+            status_text, status_color = "等待导入图像", "#A1A1A6"
+        elif result_ready:
+            status_text, status_color = "离线分析完成", "#34C759"
+        else:
+            status_text, status_color = "图像已加载", "#34C759"
+        self.workflow_status_dot.setStyleSheet(f"color: {status_color};")
+        self.workflow_status_label.setText(status_text)
 
     def _refresh_tables(self):
         det_headers = [
             "标记", "层", "中心 X (μm)", "中心 Y (μm)",
-            "尺寸/直径 (μm)", "残差 (μm)", "边缘点数", "置信度", "识别方式",
+            "尺寸/直径 (μm)", "参考残差 (μm)", "边缘点数", "置信度", "算法",
             "质量状态", "覆盖率", "形状参数", "提示",
         ]
         det_rows = []
@@ -2610,43 +2572,43 @@ class MainWindow(QMainWindow):
             for layer, d in layer_map.items():
                 if d.fitting_mode == "Rectangle":
                     shape_txt = (
-                        f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.6f}μm, "
-                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.6f}μm, "
+                        f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.3f}μm, "
+                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm, "
                         f"角度={d.shape_params.get('angle_deg', 0):.3f}°"
                     )
                 elif d.fitting_mode == "Ellipse":
                     shape_txt = (
-                        f"长轴={d.shape_params.get('major_px', 0) * mean_scale:.6f}μm, "
-                        f"短轴={d.shape_params.get('minor_px', 0) * mean_scale:.6f}μm, "
+                        f"长轴={d.shape_params.get('major_px', 0) * mean_scale:.3f}μm, "
+                        f"短轴={d.shape_params.get('minor_px', 0) * mean_scale:.3f}μm, "
                         f"角度={d.shape_params.get('angle_deg', 0):.3f}°"
                     )
                 elif d.fitting_mode == "Circle":
-                    shape_txt = f"半径={d.shape_params.get('radius_px', 0) * mean_scale:.6f}μm"
+                    shape_txt = f"半径={d.shape_params.get('radius_px', 0) * mean_scale:.3f}μm"
                 elif d.fitting_mode == "EdgeCenter":
                     shape_txt = (
-                        f"边缘中心, 参考半径={d.shape_params.get('radius_px', 0) * mean_scale:.6f}μm, "
-                        f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.6f}μm, "
-                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.6f}μm"
+                        f"边缘中心, 参考半径={d.shape_params.get('radius_px', 0) * mean_scale:.3f}μm, "
+                        f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.3f}μm, "
+                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm"
                     )
                 elif d.fitting_mode == "CaliperCircle":
                     shape_txt = (
-                        f"卡尺圆, 半径={d.shape_params.get('radius_px', 0) * mean_scale:.6f}μm, "
+                        f"卡尺圆, 半径={d.shape_params.get('radius_px', 0) * mean_scale:.3f}μm, "
                         f"内点={d.shape_params.get('inlier_count', 0)}, "
                         f"剔除={d.shape_params.get('rejected_count', 0)}, "
                         f"卡尺={d.shape_params.get('caliper_count', 0)}"
                     )
                 elif d.fitting_mode == "ProductionRectangle":
                     shape_txt = (
-                        f"方形精测, 宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.6f}μm, "
-                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.6f}μm, "
+                        f"方形精测, 宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.3f}μm, "
+                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm, "
                         f"角度={d.shape_params.get('angle_deg', 0):.3f}°"
                     )
                 elif d.fitting_mode in {"AutoCircle", "AutoRectangle", "ProductionCircle"}:
                     shape_type = "方形精测" if d.fitting_mode == "ProductionRectangle" else ("圆形精测" if d.fitting_mode == "ProductionCircle" else ("方形轮廓" if d.fitting_mode == "AutoRectangle" else "圆形轮廓"))
                     shape_txt = (
-                        f"{shape_type}, 参考半径={d.shape_params.get('radius_px', 0) * mean_scale:.6f}μm, "
-                        f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.6f}μm, "
-                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.6f}μm"
+                        f"{shape_type}, 参考半径={d.shape_params.get('radius_px', 0) * mean_scale:.3f}μm, "
+                        f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.3f}μm, "
+                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm"
                     )
                 else:
                     shape_txt = ""
@@ -2655,6 +2617,7 @@ class MainWindow(QMainWindow):
                     "Ellipse": "椭圆",
                     "Circle": "圆",
                     "EdgeCenter": "边缘中心",
+                    "RegionCenter": "区域中心",
                     "CaliperCircle": "卡尺找圆",
                     "AutoCircle": "自动圆轮廓",
                     "AutoRectangle": "自动方形轮廓",
@@ -2683,8 +2646,8 @@ class MainWindow(QMainWindow):
                     display_mark_id = f"{mark_id} [{manual_labels[(mark_id, layer)]}]"
                 det_rows.append([
                     display_mark_id, LAYER_LABELS.get(layer, layer),
-                    f"{d.center_x_um:.6f}", f"{d.center_y_um:.6f}",
-                    f"{d.diameter_um:.6f}", f"{d.residual_um:.6f}",
+                    f"{d.center_x_um:.3f}", f"{d.center_y_um:.3f}",
+                    f"{d.diameter_um:.3f}", f"{d.residual_um:.3f}",
                     str(d.edge_point_count), f"{d.confidence:.3f}", mode_txt,
                     {"Valid": "有效", "Invalid": "无效"}.get(d.shape_params.get("quality_status", ""), ""),
                     f"{d.shape_params.get('coverage', 0):.1%}" if "coverage" in d.shape_params else "",
@@ -2692,7 +2655,7 @@ class MainWindow(QMainWindow):
                 ])
         self._fill_table(self.det_table, det_headers, det_rows)
 
-        ov_headers = ["项目", "指标", "数值", "结果", "提示"]
+        ov_headers = ["项目", "Dx/Dy/Dxy/Rz", "数值", "判定", "提示"]
         ov_rows = []
         for row in self._build_summary_rows():
             project = row.get("项目", "")
@@ -2701,7 +2664,7 @@ class MainWindow(QMainWindow):
             for key, value in row.items():
                 if key in {"项目", "判定", "提示", "公式", "L(μm)"}:
                     continue
-                ov_rows.append([project, key, f"{value:.9f}" if isinstance(value, float) else value, verdict, note])
+                ov_rows.append([project, key, f"{value:.3f}" if isinstance(value, float) else value, verdict, note])
             if project == "Rz":
                 ov_rows[-1][4] = f"{row.get('公式', '')}；L={row.get('L(μm)', '')}；{note}".strip("；")
         self._fill_table(self.overlay_table, ov_headers, ov_rows)
@@ -2710,24 +2673,15 @@ class MainWindow(QMainWindow):
         table.setColumnCount(len(headers))
         table.setHorizontalHeaderLabels(headers)
         table.setRowCount(len(rows))
-        table.verticalHeader().setVisible(False)
-        table.setAlternatingRowColors(True)
-        table.setSelectionBehavior(QTableWidget.SelectRows)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         for r, row in enumerate(rows):
             for c, val in enumerate(row):
                 item = QTableWidgetItem(str(val))
                 row_text = " ".join(str(x) for x in row)
-                if "失败" in row_text or "超限" in row_text or "不通过" in row_text or "Fail" in row_text:
+                if "失败" in row_text or "超限" in row_text or "Fail" in row_text:
                     item.setBackground(QColor(255, 199, 206))
                     item.setForeground(QColor(156, 0, 6))
-                elif "通过" in row_text:
-                    item.setForeground(QColor("#1D1D1F"))
                 table.setItem(r, c, item)
-        header = table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        if table.columnCount() > 0:
-            header.setSectionResizeMode(table.columnCount() - 1, QHeaderView.Stretch)
+        table.resizeColumnsToContents()
 
     def zoom_canvases(self, factor: float):
         self.upper_canvas.zoom_by(factor)
@@ -2866,6 +2820,12 @@ class MainWindow(QMainWindow):
         return (expected == "Any" or expected == shape) and minimum <= detection.diameter_um <= maximum
 
     def _refresh_auto_selection_combos(self):
+        """Refresh reference/target contour selectors for both Auto and Manual workflows.
+
+        Auto workflow uses contours detected by auto_mark_detector and labeled a/b/c/d.
+        Manual workflow uses the currently analyzed manual ROI results, so users can
+        explicitly choose which ROI is the reference contour and which is the target contour.
+        """
         if not hasattr(self, "auto_reference_combo"):
             return
         mark_id = self._current_mark_id()
@@ -2877,32 +2837,53 @@ class MainWindow(QMainWindow):
         self.auto_target_combo.blockSignals(True)
         self.auto_reference_combo.clear()
         self.auto_target_combo.clear()
-        self.auto_reference_combo.addItem("自动识别后选择基准 Mark", "")
-        self.auto_target_combo.addItem("自动识别后选择待测 Mark", "")
-        mark = self.marks[mark_id]
-        for label, layer_map in self.auto_detections_by_mark[mark_id].items():
-            detection = next(iter(layer_map.values()))
-            if detection.shape_params.get("quality_status") != "Valid":
-                continue
-            shape = "方" if detection.fitting_mode == "ProductionRectangle" else "圆"
-            radius = detection.shape_params.get("radius_px", detection.diameter_px / 2.0)
-            size_name = "半尺寸" if detection.fitting_mode in {"AutoRectangle", "ProductionRectangle"} else "半径"
-            mean_scale = 0.5 * (self.config.pixel_size_x_um + self.config.pixel_size_y_um)
-            text = f"{mark_id}-{label} - {shape} - {size_name}={radius * mean_scale:.6f} μm"
-            if self._matches_auto_rule(detection, "reference", mark):
+
+        if self._is_auto_workflow():
+            mark = self.marks[mark_id]
+            for label, layer_map in self.auto_detections_by_mark[mark_id].items():
+                detection = next(iter(layer_map.values()))
+                if detection.shape_params.get("quality_status") != "Valid":
+                    continue
+                shape = "方" if detection.fitting_mode == "ProductionRectangle" else "圆"
+                radius = detection.shape_params.get("radius_px", detection.diameter_px / 2.0)
+                size_name = "半尺寸" if detection.fitting_mode in {"AutoRectangle", "ProductionRectangle"} else "半径"
+                mean_scale = 0.5 * (self.config.pixel_size_x_um + self.config.pixel_size_y_um)
+                text = f"{mark_id}-{label} - {shape} - {size_name}={radius * mean_scale:.3f} μm"
+                if self._matches_auto_rule(detection, "reference", mark):
+                    self.auto_reference_combo.addItem(text, label)
+                if self._matches_auto_rule(detection, "target", mark):
+                    self.auto_target_combo.addItem(text, label)
+        else:
+            layer_map = self.detections.get(mark_id, {})
+            for layer in ("upper", "lower"):
+                detection = layer_map.get(layer)
+                if detection is None:
+                    continue
+                label = layer
+                layer_name = LAYER_LABELS.get(layer, layer)
+                fit_name = {
+                    "Circle": "圆拟合",
+                    "Ellipse": "椭圆拟合",
+                    "Rectangle": "矩形拟合",
+                    "EdgeCenter": "稳健中心",
+                    "RegionCenter": "区域中心",
+                    "CaliperCircle": "卡尺圆",
+                }.get(detection.fitting_mode, detection.fitting_mode)
+                text = (
+                    f"{mark_id}-{layer_name}轮廓 - {fit_name} - "
+                    f"中心=({detection.center_x_um:.3f}, {detection.center_y_um:.3f}) μm"
+                )
                 self.auto_reference_combo.addItem(text, label)
-            if self._matches_auto_rule(detection, "target", mark):
                 self.auto_target_combo.addItem(text, label)
-        if self.auto_reference_combo.count() > 1:
+
+        if self.auto_reference_combo.count() > 0:
             self._set_combo_value(self.auto_reference_combo, previous_reference)
             if not self.auto_reference_combo.currentData():
-                self.auto_reference_combo.setCurrentIndex(1)
-        if self.auto_target_combo.count() > 1:
+                self.auto_reference_combo.setCurrentIndex(0)
+        if self.auto_target_combo.count() > 0:
             self._set_combo_value(self.auto_target_combo, previous_target)
-            if not self.auto_target_combo.currentData():
+            if self.auto_target_combo.currentData() == self.auto_reference_combo.currentData() and self.auto_target_combo.count() > 1:
                 self.auto_target_combo.setCurrentIndex(1)
-            if self.auto_target_combo.currentData() == self.auto_reference_combo.currentData() and self.auto_target_combo.count() > 2:
-                self.auto_target_combo.setCurrentIndex(2)
         self.auto_reference_combo.blockSignals(False)
         self.auto_target_combo.blockSignals(False)
         self.auto_selections[mark_id] = {
@@ -2918,86 +2899,143 @@ class MainWindow(QMainWindow):
             images.append(("lower", self._image_for_layer("lower", mark_id)))
         if any(image is None for _, image in images):
             if show_message:
-                self._show_warning("自动识别", "请先导入当前量测模式需要的图像。")
+                QMessageBox.warning(self, "自动识别", "请先导入当前测量模式需要的图像。")
             return 0
-        results_all = []
-        for layer, image in images:
-            results = detect_auto_marks(
-                image.gray,
-                layer,
-                self.params,
-                self.config.pixel_size_x_um,
-                self.config.pixel_size_y_um,
-            )
-            results_all.extend(results)
-        results_all.sort(key=lambda result: -result.diameter_px)
+
+        if hasattr(self, "auto_detect_btn"):
+            self.auto_detect_btn.setEnabled(False)
+        self.statusBar().showMessage("正在自动识别轮廓，请稍候……", 5000)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        QApplication.processEvents()
+
         detected = {}
         candidates = {}
-        for label_index, result in enumerate(results_all):
-            label = self._alpha_label(label_index)
-            result.mark_id = f"{mark_id}-{label}"
-            candidates[label] = {result.layer: result}
-            image = self._image_for_layer(result.layer, mark_id)
-            measured = refine_candidate(image.gray, result, self.params, self.config)
-            if not (self.params.diameter_min_um <= measured.diameter_um <= self.params.diameter_max_um):
-                measured.shape_params["quality_status"] = "Invalid"
-                measured.shape_params["failure_reason"] = "尺寸超出配方范围"
-                measured.warning = "尺寸超出配方范围"
-            detected[label] = {result.layer: measured}
-        self.auto_candidates_by_mark[mark_id] = candidates
-        self.auto_detections_by_mark[mark_id] = detected
-        self.auto_overlays.pop(mark_id, None)
-        self.auto_selections[mark_id] = {"reference_label": "", "target_label": ""}
-        self._refresh_auto_selection_combos()
-        self._refresh_all_widgets()
-        if show_message:
-            if detected:
-                valid_count = sum(
-                    next(iter(layer_map.values())).shape_params.get("quality_status") == "Valid"
-                    for layer_map in detected.values()
-                )
-                self._show_info("自动精测完成", f"共发现 {len(detected)} 个候选，精测有效 {valid_count} 个。")
-            else:
-                self._show_warning("自动识别", "未找到可用轮廓，请检查图像对比度、ROI 范围或算法参数。")
-        return len(detected)
+        try:
+            results_all = []
+            for layer, image in images:
+                try:
+                    results = detect_auto_marks(
+                        image.gray,
+                        layer,
+                        self.params,
+                        self.config.pixel_size_x_um,
+                        self.config.pixel_size_y_um,
+                    )
+                except Exception as exc:
+                    self._append_log(f"自动识别 {mark_id} {LAYER_LABELS.get(layer, layer)} 失败：{self._friendly_error(exc)}")
+                    results = []
+                results_all.extend(results)
+                QApplication.processEvents()
+
+            results_all.sort(key=lambda result: -result.diameter_px)
+            # Avoid UI stalls on noisy images by refining only the largest/relevant candidates.
+            max_candidates = 32
+            results_all = results_all[:max_candidates]
+            for label_index, result in enumerate(results_all):
+                label = self._alpha_label(label_index)
+                result.mark_id = f"{mark_id}-{label}"
+                candidates[label] = {result.layer: result}
+                image = self._image_for_layer(result.layer, mark_id)
+                try:
+                    measured = refine_candidate(image.gray, result, self.params, self.config)
+                except Exception as exc:
+                    measured = result
+                    measured.shape_params["quality_status"] = "Invalid"
+                    measured.shape_params["failure_reason"] = f"精测失败：{self._friendly_error(exc)}"
+                    measured.warning = measured.shape_params["failure_reason"]
+                if not (self.params.diameter_min_um <= measured.diameter_um <= self.params.diameter_max_um):
+                    measured.shape_params["quality_status"] = "Invalid"
+                    measured.shape_params["failure_reason"] = "尺寸超出配方范围"
+                    measured.warning = "尺寸超出配方范围"
+                detected[label] = {result.layer: measured}
+                QApplication.processEvents()
+
+            self.auto_candidates_by_mark[mark_id] = candidates
+            self.auto_detections_by_mark[mark_id] = detected
+            self.auto_overlays.pop(mark_id, None)
+            self.auto_selections[mark_id] = {"reference_label": "", "target_label": ""}
+            self._refresh_auto_selection_combos()
+            self._refresh_all_widgets()
+            if show_message:
+                if detected:
+                    valid_count = sum(
+                        next(iter(layer_map.values())).shape_params.get("quality_status") == "Valid"
+                        for layer_map in detected.values()
+                    )
+                    QMessageBox.information(self, "自动精测完成", f"共发现 {len(detected)} 个候选，精测有效 {valid_count} 个。")
+                else:
+                    QMessageBox.warning(self, "自动识别", "未找到可用的闭合 Mark 轮廓，请检查对比度、焦面、ROI/算法参数或改用手动 ROI。")
+            self.statusBar().showMessage(f"自动识别完成：{len(detected)} 个候选", 5000)
+            return len(detected)
+        finally:
+            QApplication.restoreOverrideCursor()
+            if hasattr(self, "auto_detect_btn"):
+                self.auto_detect_btn.setEnabled(True)
+
+    def _find_manual_detection(self, mark_id: str, label: str) -> Optional[DetectionResult]:
+        if label in {"upper", "lower"}:
+            return self.detections.get(mark_id, {}).get(label)
+        return None
 
     def calculate_auto_overlay(self, show_message: bool = True):
+        """Calculate overlay from the selected reference/target contours.
+
+        The historical name is kept to avoid changing signal connections, but the
+        function now supports both 自动识别测量 and 手动 ROI 测量.
+        """
         mark_id = self._current_mark_id()
         reference_label = self.auto_reference_combo.currentData() or ""
         target_label = self.auto_target_combo.currentData() or ""
         if not reference_label or not target_label or reference_label == target_label:
             if show_message:
-                self._show_warning("自动计算", "请选择不同的基准 Mark 和待测 Mark。")
+                QMessageBox.warning(self, "计算对位偏差", "请选择不同的基准轮廓和待测轮廓。")
             return None
-        reference = self._find_auto_detection(mark_id, reference_label)
-        target = self._find_auto_detection(mark_id, target_label)
+        self._pull_config_from_ui()
+
+        if self._is_auto_workflow():
+            reference = self._find_auto_detection(mark_id, reference_label)
+            target = self._find_auto_detection(mark_id, target_label)
+            missing_message = "所选轮廓不存在，请重新执行自动识别。"
+        else:
+            reference = self._find_manual_detection(mark_id, reference_label)
+            target = self._find_manual_detection(mark_id, target_label)
+            missing_message = "所选手动 ROI 轮廓不存在，请先分析对应 ROI。"
+
         if reference is None or target is None:
             if show_message:
-                self._show_warning("自动计算", "所选轮廓不存在，请重新执行自动识别。")
+                QMessageBox.warning(self, "计算对位偏差", missing_message)
             return None
         invalid = [
             label
             for label, detection in ((reference_label, reference), (target_label, target))
-            if detection.shape_params.get("quality_status") != "Valid"
+            if detection.shape_params.get("quality_status") == "Invalid"
         ]
         if invalid:
             if show_message:
-                self._show_warning("自动计算", "所选轮廓未通过精测质量门槛，不能用于正式对位判定。")
+                QMessageBox.warning(self, "计算对位偏差", "所选轮廓未通过质量门槛，不能用于对位判定。")
             return None
-        self._pull_config_from_ui()
+
         name = f"{mark_id}: {target_label} 相对 {reference_label}"
         overlay = calculate_relative_overlay(mark_id, reference, target, self.config)
         if self.config.recipe_validation_status != "Validated":
             overlay.result = "Trial"
             overlay.warning = "试测/未验证配方，不作正式判定"
-        self.auto_overlays[mark_id] = overlay
+
+        if self._is_auto_workflow():
+            self.auto_overlays[mark_id] = overlay
+        else:
+            self.overlays[mark_id] = overlay
         self.auto_selections[mark_id] = {
             "reference_label": reference_label,
             "target_label": target_label,
         }
         self._refresh_all_widgets()
         if show_message:
-            self._show_info("自动计算完成", f"{name}：Dx={overlay.delta_x_um:.6f} μm，Dy={overlay.delta_y_um:.6f} μm，Dxy={overlay.overlay_r_um:.6f} μm")
+            QMessageBox.information(
+                self,
+                "计算完成",
+                f"{name}：Dx={overlay.delta_x_um:.3f} μm，Dy={overlay.delta_y_um:.3f} μm，Dxy={overlay.overlay_r_um:.3f} μm",
+            )
         return overlay
 
     def on_three_point_circle_toggled(self, checked: bool):
@@ -3005,6 +3043,209 @@ class MainWindow(QMainWindow):
             self._set_combo_value(self.roi_type_combo, "Caliper Circle")
         self.upper_canvas.set_circle_pick_mode(checked)
         self.lower_canvas.set_circle_pick_mode(checked)
+
+
+    def _is_batch_mode(self) -> bool:
+        return hasattr(self, "measurement_run_mode_combo") and self._combo_value(self.measurement_run_mode_combo) == "Batch"
+
+    def import_batch_images(self, mark_id: str, layer: str):
+        title = f"批量导入 {mark_id} {LAYER_LABELS.get(layer, layer)}图像"
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            title,
+            "",
+            "图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;矩阵 (*.csv *.txt *.npy);;全部文件 (*)",
+        )
+        if not paths:
+            self._append_log(f"取消{title}。")
+            return
+        try:
+            self._ensure_mark_runtime(mark_id)
+            images = [load_image(path) for path in paths]
+            self.batch_images[mark_id][layer] = images
+            # Use first repeat as preview image so ROI can be drawn/confirmed once.
+            if images:
+                self.mark_images[mark_id][layer] = images[0]
+                self._invalidate_image_dependent_results(mark_id, layer)
+            self._set_combo_value(self.measurement_run_mode_combo, "Batch")
+            self._sync_current_mark_images()
+            self._refresh_auto_selection_combos()
+            self._refresh_all_widgets()
+            self._append_log(f"{title}完成：{len(images)} 张。")
+        except Exception as exc:
+            self._append_log(f"{title}失败：{exc}")
+            QMessageBox.critical(self, "批量导入失败", str(exc))
+
+    def clear_batch_images(self):
+        self.batch_images = {"Mark1": {"upper": [], "lower": []}, "Mark2": {"upper": [], "lower": []}}
+        self.batch_overlays = {"Mark1": [], "Mark2": []}
+        self._refresh_all_widgets()
+        self._append_log("已清空批量图像和重复性结果。")
+
+    def _refresh_batch_image_table(self):
+        if not hasattr(self, "batch_image_table"):
+            return
+        headers = ["Mark", "上层/单图数量", "下层数量", "状态"]
+        rows = []
+        is_dual = self._current_mode() == "Dual Image"
+        for mark_id in ("Mark1", "Mark2"):
+            upper_count = len(self.batch_images.get(mark_id, {}).get("upper", []))
+            lower_count = len(self.batch_images.get(mark_id, {}).get("lower", []))
+            if upper_count == 0:
+                status = "未导入"
+            elif is_dual and lower_count == 0:
+                status = "缺少下层"
+            elif is_dual and upper_count != lower_count:
+                status = "上下数量不一致"
+            else:
+                status = "可批量计算"
+            rows.append([mark_id, str(upper_count), str(lower_count), status])
+        self._fill_table(self.batch_image_table, headers, rows)
+
+    def _refresh_repeatability_table(self):
+        if not hasattr(self, "repeat_table"):
+            return
+        headers = ["Mark", "次数", "Dx(μm)", "Dy(μm)", "Dxy(μm)", "判定", "提示"]
+        rows = []
+        series = {}
+        for mark_id in ("Mark1", "Mark2"):
+            overlays = self.batch_overlays.get(mark_id, [])
+            if overlays:
+                series[f"{mark_id} Dx"] = [o.delta_x_um for o in overlays]
+                series[f"{mark_id} Dy"] = [o.delta_y_um for o in overlays]
+            for idx, overlay in enumerate(overlays, start=1):
+                rows.append([
+                    mark_id,
+                    str(idx),
+                    f"{overlay.delta_x_um:+.3f}",
+                    f"{overlay.delta_y_um:+.3f}",
+                    f"{overlay.overlay_r_um:.3f}",
+                    {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result),
+                    overlay.warning,
+                ])
+            if overlays:
+                dxs = np.asarray([o.delta_x_um for o in overlays], dtype=float)
+                dys = np.asarray([o.delta_y_um for o in overlays], dtype=float)
+                rs = np.asarray([o.overlay_r_um for o in overlays], dtype=float)
+                if len(overlays) >= 2:
+                    dx_3sigma = float(3.0 * np.std(dxs, ddof=1))
+                    dy_3sigma = float(3.0 * np.std(dys, ddof=1))
+                    r_3sigma = float(3.0 * np.std(rs, ddof=1))
+                else:
+                    dx_3sigma = dy_3sigma = r_3sigma = 0.0
+                rows.append([
+                    mark_id,
+                    "统计",
+                    f"均值={np.mean(dxs):+.3f}; 3σ={dx_3sigma:.3f}",
+                    f"均值={np.mean(dys):+.3f}; 3σ={dy_3sigma:.3f}",
+                    f"均值={np.mean(rs):.3f}; 3σ={r_3sigma:.3f}",
+                    "-",
+                    "重复性统计",
+                ])
+        self._fill_table(self.repeat_table, headers, rows)
+        if hasattr(self, "repeat_plot"):
+            self.repeat_plot.set_series(series)
+
+    def _mean_overlay(self, mark_id: str, overlays: list[OverlayResult]) -> Optional[OverlayResult]:
+        if not overlays:
+            return None
+        dx = float(np.mean([o.delta_x_um for o in overlays]))
+        dy = float(np.mean([o.delta_y_um for o in overlays]))
+        r = float(np.hypot(dx, dy))
+        warnings = []
+        if abs(dx) > self.config.delta_x_limit_um:
+            warnings.append("Dx均值超限")
+        if abs(dy) > self.config.delta_y_limit_um:
+            warnings.append("Dy均值超限")
+        if r > self.config.overlay_r_limit_um:
+            warnings.append("Dxy均值超限")
+        return OverlayResult(
+            mark_id=mark_id,
+            delta_x_px=0.0,
+            delta_y_px=0.0,
+            delta_x_um=dx,
+            delta_y_um=dy,
+            overlay_r_um=r,
+            result="Fail" if warnings else "Pass",
+            warning="；".join(warnings),
+        )
+
+    def calculate_batch_overlays(self):
+        self._pull_config_from_ui()
+        original_mark = self._current_mark_id()
+        original_images = {mark_id: dict(self.mark_images[mark_id]) for mark_id in ("Mark1", "Mark2")}
+        self.batch_overlays = {"Mark1": [], "Mark2": []}
+        calculated_lines = []
+        skipped = []
+        is_dual = self._current_mode() == "Dual Image"
+
+        for mark_id in ("Mark1", "Mark2"):
+            upper_list = self.batch_images.get(mark_id, {}).get("upper", [])
+            lower_list = self.batch_images.get(mark_id, {}).get("lower", [])
+            if not upper_list:
+                continue
+            run_count = len(upper_list)
+            if is_dual:
+                run_count = min(len(upper_list), len(lower_list))
+                if run_count == 0:
+                    skipped.append(f"{mark_id}：批量模式缺少下层图像")
+                    continue
+                if len(upper_list) != len(lower_list):
+                    skipped.append(f"{mark_id}：上层/下层数量不一致，仅计算前 {run_count} 次")
+            self.mark_combo.setCurrentText(mark_id)
+            for run_idx in range(run_count):
+                self.mark_images[mark_id]["upper"] = upper_list[run_idx]
+                if is_dual:
+                    self.mark_images[mark_id]["lower"] = lower_list[run_idx]
+                self._sync_current_mark_images()
+                try:
+                    if self._is_auto_workflow():
+                        saved_selection = dict(self.auto_selections.get(mark_id, {}))
+                        self.auto_detections_by_mark[mark_id] = {}
+                        self.auto_identify_marks(show_message=False)
+                        # Restore preferred reference/target labels when possible.
+                        if saved_selection:
+                            self.auto_selections[mark_id] = saved_selection
+                            self._refresh_auto_selection_combos()
+                        overlay = self.calculate_auto_overlay(show_message=False)
+                    else:
+                        self.detections.pop(mark_id, None)
+                        self.analyze_roi_regions(show_message=False)
+                        self._refresh_auto_selection_combos()
+                        overlay = self.calculate_auto_overlay(show_message=False)
+                    if overlay is not None:
+                        self.batch_overlays[mark_id].append(overlay)
+                    else:
+                        skipped.append(f"{mark_id} 第{run_idx + 1}次：未生成对位结果")
+                except Exception as exc:
+                    skipped.append(f"{mark_id} 第{run_idx + 1}次：{self._friendly_error(exc)}")
+            mean_overlay = self._mean_overlay(mark_id, self.batch_overlays[mark_id])
+            if mean_overlay is not None:
+                if self._is_auto_workflow():
+                    self.auto_overlays[mark_id] = mean_overlay
+                else:
+                    self.overlays[mark_id] = mean_overlay
+                calculated_lines.append(
+                    f"{mark_id}: {len(self.batch_overlays[mark_id])}次，"
+                    f"Dx均值={mean_overlay.delta_x_um:+.3f} μm，"
+                    f"Dy均值={mean_overlay.delta_y_um:+.3f} μm，"
+                    f"Dxy均值={mean_overlay.overlay_r_um:.3f} μm"
+                )
+
+        self.mark_combo.setCurrentText(original_mark)
+        self.mark_images = original_images
+        self._sync_current_mark_images()
+        self._refresh_auto_selection_combos()
+        self._refresh_all_widgets()
+        if hasattr(self, "result_tabs"):
+            self.result_tabs.setCurrentIndex(1)
+        if calculated_lines:
+            msg = "批量计算完成：\n" + "\n".join(calculated_lines)
+            if skipped:
+                msg += "\n\n提示：\n" + "\n".join(skipped)
+            QMessageBox.information(self, "批量计算完成", msg)
+        else:
+            QMessageBox.warning(self, "批量计算", "未生成任何批量对位结果。\n" + ("\n".join(skipped) if skipped else "请先批量导入图像，并确认 ROI 与轮廓选择。"))
 
     def import_upper_image(self):
         mark_id = self._current_mark_id()
@@ -3015,6 +3256,7 @@ class MainWindow(QMainWindow):
             "图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;矩阵 (*.csv *.txt *.npy);;全部文件 (*)",
         )
         if not path:
+            self._append_log("取消导入上层/单图。")
             return
         try:
             self._ensure_mark_runtime(mark_id)
@@ -3022,8 +3264,10 @@ class MainWindow(QMainWindow):
             self._invalidate_image_dependent_results(mark_id, "upper")
             self._sync_current_mark_images()
             self._refresh_auto_selection_combos()
+            self._append_log(f"已导入上层/单图：{Path(path).name}")
         except Exception as exc:
-            self._show_error("导入失败", f"图像导入异常，请检查文件格式或路径是否有效。\n{exc}")
+            self._append_log(f"导入上层/单图失败：{exc}")
+            QMessageBox.critical(self, "导入失败", str(exc))
         self._refresh_all_widgets()
 
     def import_lower_image(self):
@@ -3035,6 +3279,7 @@ class MainWindow(QMainWindow):
             "图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;矩阵 (*.csv *.txt *.npy);;全部文件 (*)",
         )
         if not path:
+            self._append_log("取消导入下层图像。")
             return
         try:
             self._ensure_mark_runtime(mark_id)
@@ -3042,8 +3287,10 @@ class MainWindow(QMainWindow):
             self._invalidate_image_dependent_results(mark_id, "lower")
             self._sync_current_mark_images()
             self._refresh_auto_selection_combos()
+            self._append_log(f"已导入下层图像：{Path(path).name}")
         except Exception as exc:
-            self._show_error("导入失败", f"图像导入异常，请检查文件格式或路径是否有效。\n{exc}")
+            self._append_log(f"导入下层图像失败：{exc}")
+            QMessageBox.critical(self, "导入失败", str(exc))
         self._refresh_all_widgets()
 
     def add_mark(self):
@@ -3051,7 +3298,7 @@ class MainWindow(QMainWindow):
             mark_id: self.marks.get(mark_id, MarkRecipe(mark_id))
             for mark_id in ("Mark1", "Mark2")
         }
-        self._show_info("标记数量", "当前版本仅支持 Mark1 和 Mark2。")
+        QMessageBox.information(self, "标记数量", "本版本仅支持 Mark1 和 Mark2。")
         self._refresh_all_widgets()
 
     def reset_measurement(self):
@@ -3069,6 +3316,8 @@ class MainWindow(QMainWindow):
             "Mark2": {"reference_label": "", "target_label": ""},
         }
         self.auto_overlays.clear()
+        self.batch_images = {"Mark1": {"upper": [], "lower": []}, "Mark2": {"upper": [], "lower": []}}
+        self.batch_overlays = {"Mark1": [], "Mark2": []}
         self.upper_canvas.set_circle_pick_mode(False)
         self.lower_canvas.set_circle_pick_mode(False)
         self.three_point_circle_btn.blockSignals(True)
@@ -3195,16 +3444,26 @@ class MainWindow(QMainWindow):
         )
         detect_params = replace(self.params, fitting_mode=layer_fit_mode)
 
-        edges = detect_subpixel_edges(img.gray, roi, detect_params)
-        if len(edges.points_xy) < detect_params.min_edge_points:
-            raise ValueError(
-                f"{mark.mark_id} {LAYER_LABELS[layer]} 有效边缘点不足：{len(edges.points_xy)} < {detect_params.min_edge_points}. "
-                f"可以尝试放大 ROI、降低 Canny/最小梯度，或检查焦面和对比度。"
-            )
-        fit = fit_mark_shape(edges.points_xy, detect_params)
-        used_points = edges.points_xy
-        if fit.inlier_mask is not None and len(fit.inlier_mask) == len(edges.points_xy):
-            used_points = edges.points_xy[fit.inlier_mask]
+        if detect_params.fitting_mode == "RegionCenter":
+            # True Z-stack style region-center path: segment the target area in the ROI
+            # and calculate the center from the segmented region. This bypasses Canny /
+            # subpixel edge extraction, so rounded square holes can be measured even
+            # when edge points are weak or discontinuous.
+            fit = detect_region_center(img.gray, roi, detect_params)
+            used_points = np.asarray(fit.shape_params.get("contour_points", []), dtype=np.float64)
+            edge_warning = ""
+        else:
+            edges = detect_subpixel_edges(img.gray, roi, detect_params)
+            if len(edges.points_xy) < detect_params.min_edge_points:
+                raise ValueError(
+                    f"{mark.mark_id} {LAYER_LABELS[layer]} 有效边缘点不足：{len(edges.points_xy)} < {detect_params.min_edge_points}. "
+                    f"可以尝试放大 ROI、降低 Canny/最小梯度，或检查焦面和对比度。"
+                )
+            fit = fit_mark_shape(edges.points_xy, detect_params)
+            used_points = edges.points_xy
+            if fit.inlier_mask is not None and len(fit.inlier_mask) == len(edges.points_xy):
+                used_points = edges.points_xy[fit.inlier_mask]
+            edge_warning = edges.warning
 
         px_x = self.config.pixel_size_x_um
         px_y = self.config.pixel_size_y_um
@@ -3223,7 +3482,7 @@ class MainWindow(QMainWindow):
             edge_point_count=len(used_points),
             confidence=fit.confidence,
             fitting_mode=fit.mode,
-            warning=fit.warning or edges.warning,
+            warning=fit.warning or edge_warning,
             edge_points=[(float(x), float(y)) for x, y in used_points],
             shape_params={
                 **fit.shape_params,
@@ -3242,36 +3501,136 @@ class MainWindow(QMainWindow):
         self._analyze_mark(mark_id)
 
     def analyze_current_roi(self):
-        mark_id = self.mark_combo.currentText()
+        # Backward-compatible entry. V1.2.5 uses batch ROI-region analysis.
+        return self.analyze_roi_regions()
+
+    def analyze_roi_regions(self, show_message: bool = True):
+        """Analyze every ROI region already set for the current Mark.
+
+        Manual ROI measurement should not require switching between upper/lower layers and
+        clicking analyze repeatedly. This method detects all available ROI regions for the
+        current Mark, refreshes reference/target selectors, and leaves overlay calculation
+        to the single top toolbar button.
+        """
+        mark_id = self.mark_combo.currentText() or self._current_mark_id()
         if not mark_id:
-            return
-        layer = self._current_layer()
+            return 0
         mark = self.marks[mark_id]
-        try:
-            det = self._detect_one(mark, layer)
-            self.detections.setdefault(mark_id, {})[layer] = det
-            if mark_id in self.overlays:
-                del self.overlays[mark_id]
-        except Exception as exc:
-            self._show_error("分析失败", self._friendly_error(exc))
-            return
+        layers_to_analyze = []
+        for layer in ("upper", "lower"):
+            roi = mark.upper_roi if layer == "upper" else mark.lower_roi
+            image = self._image_for_layer(layer, mark_id)
+            if roi is not None and image is not None:
+                layers_to_analyze.append(layer)
+        if not layers_to_analyze:
+            if show_message:
+                QMessageBox.warning(self, "分析 ROI 区域", "当前 Mark 没有可分析的 ROI 区域。请先导入图像并框选 ROI。")
+            return 0
+
+        analyzed = []
+        errors = []
+        self._pull_config_from_ui()
+        for layer in layers_to_analyze:
+            try:
+                det = self._detect_one(mark, layer)
+                self.detections.setdefault(mark_id, {})[layer] = det
+                analyzed.append((layer, det))
+            except Exception as exc:
+                errors.append(f"{LAYER_LABELS.get(layer, layer)}：{self._friendly_error(exc)}")
+
+        if mark_id in self.overlays:
+            del self.overlays[mark_id]
+        self._refresh_auto_selection_combos()
         self._refresh_all_widgets()
-        radius_px = det.shape_params.get("radius_px")
-        mean_scale = 0.5 * (self.config.pixel_size_x_um + self.config.pixel_size_y_um)
-        if radius_px is not None:
-            detail = f"中心=({det.center_x_um:.6f}, {det.center_y_um:.6f}) μm，半径={radius_px * mean_scale:.6f} μm"
-        else:
-            detail = f"中心=({det.center_x_um:.6f}, {det.center_y_um:.6f}) μm，尺寸={det.diameter_um:.6f} μm"
-        self._show_info("ROI 分析完成", f"{mark_id} {LAYER_LABELS[layer]}：\n{detail}")
+
+        if show_message:
+            if analyzed:
+                lines = []
+                mean_scale = 0.5 * (self.config.pixel_size_x_um + self.config.pixel_size_y_um)
+                for layer, det in analyzed:
+                    radius_px = det.shape_params.get("radius_px")
+                    if radius_px is not None:
+                        detail = f"半径={radius_px * mean_scale:.3f} μm"
+                    else:
+                        detail = f"尺寸={det.diameter_um:.3f} μm"
+                    lines.append(f"{mark_id} {LAYER_LABELS.get(layer, layer)}：中心=({det.center_x_um:.3f}, {det.center_y_um:.3f}) μm，{detail}")
+                if errors:
+                    lines.append("\n以下 ROI 未完成：")
+                    lines.extend(errors)
+                QMessageBox.information(self, "ROI 区域分析完成", "\n".join(lines))
+            else:
+                QMessageBox.warning(self, "分析 ROI 区域", "ROI 区域分析失败：\n" + "\n".join(errors))
+        return len(analyzed)
 
     def analyze_all_marks(self):
-        for mark_id in list(self.marks.keys()):
+        """Calculate overlay for every prepared Mark in one click.
+
+        The top blue button is the single production entry. It traverses Mark1 and
+        Mark2, supports both Auto and Manual workflows, refreshes ROI detection when
+        needed, and calculates every Mark that already has valid reference/target
+        contours. This avoids asking technicians to switch Mark one by one.
+        """
+        self._pull_config_from_ui()
+        if self._is_batch_mode():
+            return self.calculate_batch_overlays()
+        original_mark = self._current_mark_id()
+        calculated = []
+        skipped = []
+
+        for mark_id in ("Mark1", "Mark2"):
+            if mark_id not in self.marks:
+                continue
+            self.mark_combo.setCurrentText(mark_id)
+            self._sync_current_mark_images()
+            self._refresh_auto_selection_combos()
+
             try:
-                self._analyze_mark(mark_id, show_success=False)
+                if self._is_auto_workflow():
+                    if not self._current_auto_detections():
+                        self.auto_identify_marks(show_message=False)
+                    self._refresh_auto_selection_combos()
+                    reference_label = self.auto_reference_combo.currentData() or ""
+                    target_label = self.auto_target_combo.currentData() or ""
+                    if not reference_label or not target_label or reference_label == target_label:
+                        skipped.append(f"{mark_id}：未选择有效的基准/待测轮廓")
+                        continue
+                    overlay = self.calculate_auto_overlay(show_message=False)
+                else:
+                    analyzed_count = self.analyze_roi_regions(show_message=False)
+                    self._refresh_auto_selection_combos()
+                    reference_label = self.auto_reference_combo.currentData() or ""
+                    target_label = self.auto_target_combo.currentData() or ""
+                    if not reference_label or not target_label or reference_label == target_label:
+                        skipped.append(f"{mark_id}：未选择有效的基准/待测轮廓")
+                        continue
+                    overlay = self.calculate_auto_overlay(show_message=False)
+
+                if overlay is not None:
+                    calculated.append(
+                        f"{mark_id}: Dx={overlay.delta_x_um:+.3f} μm, "
+                        f"Dy={overlay.delta_y_um:+.3f} μm, Dxy={overlay.overlay_r_um:.3f} μm"
+                    )
+                else:
+                    skipped.append(f"{mark_id}：未生成对位结果")
             except Exception as exc:
-                self._show_warning("分析中断", f"{mark_id} 分析失败：\n{self._friendly_error(exc)}")
-                break
+                skipped.append(f"{mark_id}：{self._friendly_error(exc)}")
+
+        self.mark_combo.setCurrentText(original_mark)
+        self._sync_current_mark_images()
+        self._refresh_auto_selection_combos()
         self._refresh_all_widgets()
+
+        if calculated:
+            message = "已完成以下 Mark 的对位偏差计算：\n" + "\n".join(calculated)
+            if skipped:
+                message += "\n\n以下 Mark 未完成：\n" + "\n".join(skipped)
+            QMessageBox.information(self, "计算完成", message)
+        else:
+            QMessageBox.warning(
+                self,
+                "计算对位偏差",
+                "未生成任何对位结果。\n" + ("\n".join(skipped) if skipped else "请先导入图像、设置/识别 ROI，并选择基准轮廓和待测轮廓。"),
+            )
 
     def _analyze_mark(self, mark_id: str, show_success: bool = True):
         self._pull_config_from_ui()
@@ -3281,18 +3640,20 @@ class MainWindow(QMainWindow):
             lower = self._detect_one(mark, "lower")
             self.detections.setdefault(mark_id, {})["upper"] = upper
             self.detections.setdefault(mark_id, {})["lower"] = lower
+            # 默认仍保留上层-下层计算；若用户在“基准/待测轮廓”中指定了对象，后续会用所选轮廓覆盖该结果。
             self.overlays[mark_id] = calculate_overlay(mark_id, upper, lower, self.config)
+            self._refresh_auto_selection_combos()
         except Exception as exc:
-            self._show_error("分析失败", self._friendly_error(exc))
+            QMessageBox.critical(self, "分析失败", str(exc))
             return
         self._refresh_all_widgets()
         if show_success:
-            self._show_info("分析完成", f"{mark_id} 分析完成。")
+            QMessageBox.information(self, "分析完成", f"{mark_id} 分析完成。")
 
     def export_result_file(self):
         display_detections = self._display_detections()
         if not display_detections:
-            self._show_warning("无结果", "当前没有可导出的分析结果。")
+            QMessageBox.warning(self, "无结果", "当前没有可导出的分析结果。")
             return
         self._pull_config_from_ui()
         path, _ = QFileDialog.getSaveFileName(
@@ -3351,9 +3712,9 @@ class MainWindow(QMainWindow):
                     summary_rows=self._build_summary_rows(),
                     mark_images=mark_images,
                 )
-            self._show_info("导出完成", f"结果已导出：\n{path}")
+            QMessageBox.information(self, "导出完成", f"结果已导出：\n{path}")
         except Exception as exc:
-            self._show_error("导出失败", f"结果导出异常，请检查文件是否被占用或路径是否可写。\n{exc}")
+            QMessageBox.critical(self, "导出失败", str(exc))
 
     def save_recipe_file(self):
         self._pull_config_from_ui()
@@ -3362,9 +3723,9 @@ class MainWindow(QMainWindow):
             return
         try:
             save_recipe(path, self.config, self.params, list(self.marks.values()))
-            self._show_info("保存完成", f"配方已保存：\n{path}")
+            QMessageBox.information(self, "保存完成", f"配方已保存：\n{path}")
         except Exception as exc:
-            self._show_error("保存失败", f"配方保存异常，请检查目标路径是否可写。\n{exc}")
+            QMessageBox.critical(self, "保存失败", str(exc))
 
     def load_recipe_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "加载配方", "", "JSON (*.json)")
@@ -3379,16 +3740,16 @@ class MainWindow(QMainWindow):
                 mark_id: loaded_marks.get(mark_id, MarkRecipe(mark_id))
                 for mark_id in ("Mark1", "Mark2")
             }
-            self.mark_images = {
-                "Mark1": {"upper": None, "lower": None},
-                "Mark2": {"upper": None, "lower": None},
-            }
+            # 加载配方只更新产品信息、ROI、算法参数和判定规格，不重置已导入图像。
+            # 这样用户可以先导入图像，再加载同类型物料的配方继续测量。
+            for runtime_mark in ("Mark1", "Mark2"):
+                self._ensure_mark_runtime(runtime_mark)
             self.detections.clear()
             self.overlays.clear()
             self.auto_detections_by_mark = {"Mark1": {}, "Mark2": {}}
             self.auto_candidates_by_mark = {"Mark1": {}, "Mark2": {}}
             self.auto_selections = {
-                "Mark1": {"reference_label": "", "target_label": ""},
+                "Mark1": {"reference_label": getattr(self.config, "auto_reference_label", ""), "target_label": getattr(self.config, "auto_target_label", "")},
                 "Mark2": {"reference_label": "", "target_label": ""},
             }
             self.auto_overlays.clear()
@@ -3397,9 +3758,9 @@ class MainWindow(QMainWindow):
             self._push_current_auto_match_rules()
             self._refresh_auto_selection_combos()
             self._refresh_all_widgets()
-            self._show_info("加载完成", f"配方已加载：\n{path}")
+            QMessageBox.information(self, "加载完成", f"配方已加载：\n{path}")
         except Exception as exc:
-            self._show_error("加载失败", f"配方加载异常，请检查文件格式是否正确。\n{exc}")
+            QMessageBox.critical(self, "加载失败", str(exc))
 
 
 def run_app():

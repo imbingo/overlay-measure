@@ -195,73 +195,6 @@ def _confidence_rectangle(n_points: int, residual_px: float, aspect_ratio: float
     return float(np.clip(0.45 * point_score + 0.40 * residual_score + 0.15 * aspect_score, 0.0, 1.0))
 
 
-
-def fit_region_center(points: np.ndarray) -> FitResult:
-    """Calculate a robust region-style center from the selected contour points.
-
-    This mode is intended for rounded or slightly irregular square/rectangular
-    marks. It uses the convex hull / contour moments of the selected points,
-    so it behaves more like a region-centroid measurement than a strict
-    circle/rectangle fit. It does not force the target into an ideal primitive.
-    """
-    pts = np.asarray(points, dtype=np.float64)
-    if pts is None or len(pts) < 3:
-        raise ValueError("有效边缘点数量不足，无法计算区域中心")
-
-    pts32 = pts.astype(np.float32).reshape(-1, 1, 2)
-    hull = cv2.convexHull(pts32)
-    moments = cv2.moments(hull)
-    if abs(moments.get("m00", 0.0)) > 1e-9:
-        cx = float(moments["m10"] / moments["m00"])
-        cy = float(moments["m01"] / moments["m00"])
-    else:
-        cx = float(np.mean(pts[:, 0]))
-        cy = float(np.mean(pts[:, 1]))
-
-    x_min, y_min = np.min(pts, axis=0)
-    x_max, y_max = np.max(pts, axis=0)
-    bbox_width = float(x_max - x_min)
-    bbox_height = float(y_max - y_min)
-
-    (rect_cx, rect_cy), (rw, rh), angle = cv2.minAreaRect(pts32)
-    rw = float(max(rw, 1e-9))
-    rh = float(max(rh, 1e-9))
-    width, height = rw, rh
-    report_angle = float(angle)
-    if height > width:
-        width, height = height, width
-        report_angle += 90.0
-
-    radial = np.sqrt((pts[:, 0] - cx) ** 2 + (pts[:, 1] - cy) ** 2)
-    radius = float(np.mean(radial)) if len(radial) else 0.0
-    residual = float(np.std(radial)) if len(radial) else 0.0
-    diameter = float((bbox_width + bbox_height) / 2.0) if (bbox_width > 0 and bbox_height > 0) else float(2.0 * radius)
-    area = abs(float(cv2.contourArea(hull)))
-    rect_area = max(width * height, 1e-9)
-    rectangularity = float(np.clip(area / rect_area, 0.0, 1.0))
-    confidence = float(np.clip(0.50 * min(1.0, len(pts) / 180.0) + 0.35 * rectangularity + 0.15 * np.exp(-residual / 3.0), 0.0, 1.0))
-
-    return FitResult(
-        center_x_px=cx,
-        center_y_px=cy,
-        diameter_px=diameter,
-        residual_px=residual,
-        mode="RegionCenter",
-        confidence=confidence,
-        shape_params={
-            "radius_px": radius,
-            "width_px": width,
-            "height_px": height,
-            "bbox_width_px": bbox_width,
-            "bbox_height_px": bbox_height,
-            "angle_deg": float(report_angle),
-            "region_area_px2": area,
-            "rectangularity": rectangularity,
-            "center_method": "convex_hull_moments",
-        },
-        inlier_mask=np.ones(len(pts), dtype=bool),
-    )
-
 def fit_edge_center(points: np.ndarray) -> FitResult:
     """Use the extracted edge contour itself as the measured geometry.
 
@@ -311,8 +244,6 @@ def fit_mark_shape(points: np.ndarray, params: DetectionParams) -> FitResult:
 
     if mode == "EdgeCenter":
         return fit_edge_center(points)
-    if mode == "RegionCenter":
-        return fit_region_center(points)
 
     circle_result = None
     if mode in {"Auto", "Circle"} and len(points) >= 3:

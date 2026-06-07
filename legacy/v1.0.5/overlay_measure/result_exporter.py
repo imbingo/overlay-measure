@@ -72,13 +72,12 @@ def _layer_cn(layer: str) -> str:
 
 
 def _result_cn(result: str) -> str:
-    return {"Pass": "通过", "Fail": "不通过", "Trial": "试测/不判定"}.get(result, result)
+    return {"Pass": "通过", "Fail": "失败", "Trial": "试测/不判定"}.get(result, result)
 
 
 def _fit_cn(mode: str) -> str:
     return {
         "EdgeCenter": "边缘中心",
-        "RegionCenter": "区域中心",
         "CaliperCircle": "卡尺找圆",
         "AutoCircle": "自动圆轮廓",
         "AutoRectangle": "自动方形轮廓",
@@ -222,10 +221,6 @@ def export_results(
 ) -> None:
     detail_df = pd.DataFrame(rows).rename(columns=DETAIL_COLUMNS)
     summary_df = pd.DataFrame(summary_rows or [])
-    # Keep exported measurement results concise for production review.
-    # Internal calculation remains full precision; only output tables are rounded.
-    detail_df = detail_df.round(3)
-    summary_df = summary_df.round(3)
     ext = Path(path).suffix.lower()
     if ext != ".xlsx":
         # CSV can contain only one table, so export the concise summary when available.
@@ -252,10 +247,9 @@ def export_results(
             {"项目": "像素尺寸X(μm/px)", "内容": config.pixel_size_x_um},
             {"项目": "像素尺寸Y(μm/px)", "内容": config.pixel_size_y_um},
             {"项目": "Rz分布方向", "内容": config.rz_layout},
-            {"项目": "Rz单位", "内容": "μrad"},
             {"项目": "Mark间距L(μm)", "内容": config.rz_distance_l_um},
         ]
-    info_df = pd.DataFrame(info_rows).round(3)
+    info_df = pd.DataFrame(info_rows)
 
     with TemporaryDirectory() as tmp_dir:
         with pd.ExcelWriter(path, engine="openpyxl") as writer:

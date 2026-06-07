@@ -25,9 +25,9 @@ def _quality(
     if rejected_ratio > config.production_max_rejected_ratio:
         failures.append(f"异常点比例过高({rejected_ratio:.1%})")
     if residual_um > config.production_max_residual_um:
-        failures.append(f"拟合残差超限({residual_um:.3f} μm)")
+        failures.append(f"拟合残差超限({residual_um:.4f} μm)")
     if max_deviation_um > config.production_max_radial_deviation_um:
-        failures.append(f"最大轮廓偏差超限({max_deviation_um:.3f} μm)")
+        failures.append(f"最大轮廓偏差超限({max_deviation_um:.4f} μm)")
     return ("Invalid", "；".join(failures)) if failures else ("Valid", "")
 
 
