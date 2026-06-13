@@ -13,3 +13,11 @@ env/
 outputs/
 export/
 exports/
+
+# Generated measurement outputs and saved production recipes
+*_result.xlsx
+*_results.xlsx
+overlay_results.xlsx
+overlay_recipe*.json
+*overlay_recipe.json
+PL*.json
