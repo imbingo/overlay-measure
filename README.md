@@ -4,18 +4,27 @@
 
 ## 当前版本
 
-- 当前代码版本：V1.4.2
+- 当前代码版本：V1.5
 - 来源文件：`overlay_mark_measure_v1_4_2.zip`
-- 主入口：`main.py`
+- Windows 启动文件：`start_overlay_measure.bat`
+- Python 主入口：`main.py`
 - 主界面代码：`overlay_measure/ui_main.py`
 
-压缩包原始 README 中包含 V1.4.2.2 的修复说明；应用窗口和当前源码版本标签为 V1.4.2。本次仓库更新按压缩包文件名和应用版本统一记录为 V1.4.2。
+V1.5 增加了可测试的测量服务层、黄金样例测试、算法路径显示、自动识别截断提示，并改进非等比例像素下的物理单位换算。
 
 ## 运行
 
 ```powershell
 python -m pip install -r requirements.txt
 python .\main.py
+```
+
+Windows 下也可以直接双击仓库根目录的 `start_overlay_measure.bat` 启动软件；如果缺少依赖，先执行上面的安装命令。
+
+如需生产环境完全复现当前依赖，可使用：
+
+```powershell
+python -m pip install -r requirements.lock.txt
 ```
 
 ## 主要功能
@@ -33,6 +42,7 @@ python .\main.py
 - `overlay_measure/`: 主程序模块。
 - `sample_data/`: 示例图片和示例 recipe。
 - `main.py`: GUI 启动入口。
+- `start_overlay_measure.bat`: Windows 双击启动文件。
 - `requirements.txt`: Python 依赖。
 - `legacy/v1.0.5/`: 更新前仓库版本归档，用于回看旧版本文件。
 - `CHANGELOG.md`: 版本更替记录。

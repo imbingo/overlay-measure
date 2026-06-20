@@ -21,7 +21,7 @@ def _roi_from_dict(data):
 def save_recipe(path: str, config: MeasurementConfig, params: DetectionParams, marks: List[MarkRecipe]) -> None:
     data = {
         "software_name": "Overlay Mark Measurement Software",
-        "version": "1.1",
+        "version": "1.5",
         "measurement_config": asdict(config),
         "detection_params": asdict(params),
         "marks": [

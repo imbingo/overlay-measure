@@ -39,17 +39,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .auto_mark_detector import detect_auto_marks
-from .caliper_circle_detector import detect_caliper_circle
-from .circle_ellipse_fitter import fit_mark_shape
+from .auto_mark_detector import detect_auto_marks_with_report
 from .image_loader import load_image, normalize_to_uint8
+from .measurement_service import attach_algorithm_path, describe_algorithm_path, detect_manual_roi
+from .measurement_units import axis_scale_um_per_px, rotated_rect_size_um
 from .models import DetectionParams, DetectionResult, ImageData, MarkRecipe, MeasurementConfig, OverlayResult, Roi
 from .overlay_calculator import calculate_overlay, calculate_relative_overlay
 from .production_measurement import refine_candidate
 from .recipe_manager import load_recipe, save_recipe
 from .result_exporter import build_detection_rows, export_results
-from .region_center_detector import detect_region_center
-from .subpixel_edge_detector import detect_subpixel_edges
+from .rz_calculator import build_summary_rows
 
 
 LAYER_LABELS = {"upper": "上层", "lower": "下层"}
@@ -1212,7 +1211,7 @@ class MainWindow(QMainWindow):
             if font_path.exists() and QFontDatabase.addApplicationFont(str(font_path)) >= 0:
                 break
         self.setFont(QFont("Microsoft YaHei UI", 9))
-        self.setWindowTitle("对位偏差测量软件 V1.4.2")
+        self.setWindowTitle("对位偏差测量软件 V1.5")
         self.resize(1500, 920)
 
         self.config = MeasurementConfig()
@@ -1294,7 +1293,7 @@ class MainWindow(QMainWindow):
         title_row.setSpacing(10)
         self.title_label = QLabel("对位偏差测量软件")
         self.title_label.setObjectName("titleLabel")
-        self.version_label = QLabel("V1.4.2")
+        self.version_label = QLabel("V1.5")
         self.version_label.setObjectName("versionLabel")
         self.current_recipe_label = QLabel("当前配方：未加载")
         self.current_recipe_label.setObjectName("recipeLabel")
@@ -1377,23 +1376,17 @@ class MainWindow(QMainWindow):
         detail_card.setObjectName("tableCard")
         detail_layout = QVBoxLayout(detail_card)
         detail_layout.setContentsMargins(10, 10, 10, 10)
-        detail_layout.setSpacing(8)
-        detail_title = QLabel("识别明细")
-        detail_title.setObjectName("resultTitle")
+        detail_layout.setSpacing(4)
         self.det_table = QTableWidget()
         self.det_table.setMinimumHeight(280)
-        detail_layout.addWidget(detail_title)
         detail_layout.addWidget(self.det_table)
 
         overlay_card = QFrame()
         overlay_card.setObjectName("tableCard")
         overlay_layout = QVBoxLayout(overlay_card)
         overlay_layout.setContentsMargins(10, 10, 10, 10)
-        overlay_layout.setSpacing(8)
-        overlay_title = QLabel("对位结果")
-        overlay_title.setObjectName("resultTitle")
+        overlay_layout.setSpacing(4)
         self.overlay_table = QTableWidget()
-        overlay_layout.addWidget(overlay_title)
         self.result_tabs = QTabWidget()
         overlay_tab = QWidget()
         overlay_tab_layout = QVBoxLayout(overlay_tab)
@@ -1437,6 +1430,16 @@ class MainWindow(QMainWindow):
             self.side_tabs.addTab(scroll, title)
         main_splitter.addWidget(self.side_tabs)
         main_splitter.setSizes([170, 1080, 350])
+        self._install_algorithm_path_status_button()
+
+    def _install_algorithm_path_status_button(self):
+        self.algorithm_path_text = "暂无测量结果；分析 ROI 或自动识别后可查看实际算法路径。"
+        self.algorithm_path_button = QToolButton()
+        self.algorithm_path_button.setText("算法路径")
+        self.algorithm_path_button.setAutoRaise(True)
+        self.algorithm_path_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.algorithm_path_button.setToolTip(self.algorithm_path_text)
+        self.statusBar().addPermanentWidget(self.algorithm_path_button)
 
     def _build_image_card(self, title: str, layer: str, canvas: ImageCanvas) -> QWidget:
         # V1.2：去掉图像区顶部的大标题条，减少占用空间，保留画布本身。
@@ -1951,11 +1954,17 @@ class MainWindow(QMainWindow):
         self.batch_import_mark2_lower_btn.clicked.connect(lambda: self.import_batch_images("Mark2", "lower"))
         self.batch_clear_btn.clicked.connect(self.clear_batch_images)
         self.measurement_run_mode_combo.currentIndexChanged.connect(self._refresh_all_widgets)
+        if hasattr(self, "algorithm_path_button"):
+            self.algorithm_path_button.clicked.connect(self.show_algorithm_path_dialog)
         self._install_button_feedback()
 
     def _append_log(self, message: str):
         # V1.2.5：取消独立日志窗口，所有操作反馈统一显示在左下角状态栏，避免界面拥挤。
         self.statusBar().showMessage(message, 3500)
+
+    def show_algorithm_path_dialog(self):
+        text = getattr(self, "algorithm_path_text", "暂无测量结果；分析 ROI 或自动识别后可查看实际算法路径。")
+        QMessageBox.information(self, "算法路径", text.replace("；", "\n\n"))
 
     def _install_button_feedback(self):
         for button in self.findChildren(QPushButton):
@@ -2391,6 +2400,8 @@ class MainWindow(QMainWindow):
             self._refresh_summary_cards()
         if hasattr(self, "_refresh_step_status"):
             self._refresh_step_status(current_mark, show_auto)
+        if hasattr(self, "_refresh_algorithm_path_panel"):
+            self._refresh_algorithm_path_panel(current_mark, show_auto)
 
     def _refresh_mark_combo(self):
         self.marks = {
@@ -2447,57 +2458,9 @@ class MainWindow(QMainWindow):
         return next(iter(layer_map.values()), None)
 
     def _build_summary_rows(self):
-        rows = []
-        deltas = {}
         overlay_map = self.auto_overlays if self._is_auto_workflow() else self.overlays
-        for mark_id in sorted(overlay_map.keys()):
-            o = overlay_map[mark_id]
-            idx = self._mark_number(mark_id)
-            dx = o.delta_x_um
-            dy = o.delta_y_um
-            dxy = float(np.hypot(dx, dy))
-            deltas[mark_id] = (dx, dy)
-            warnings = []
-            is_trial = self._is_auto_workflow() and (
-                self.config.recipe_validation_status != "Validated" or o.result == "Trial"
-            )
-            if not is_trial and abs(dx) > self.config.delta_x_limit_um:
-                warnings.append(f"Dx{idx}超限")
-            if not is_trial and abs(dy) > self.config.delta_y_limit_um:
-                warnings.append(f"Dy{idx}超限")
-            if not is_trial and dxy > self.config.overlay_r_limit_um:
-                warnings.append(f"Dxy{idx}超限")
-            if o.warning and not is_trial:
-                warnings.append(o.warning)
-            rows.append({
-                "项目": mark_id,
-                f"Dx{idx}(μm)": dx,
-                f"Dy{idx}(μm)": dy,
-                f"Dxy{idx}(μm)": dxy,
-                "判定": "试测" if is_trial else ("不通过" if warnings else "通过"),
-                "提示": "未验证配方，不作正式判定" if is_trial else "；".join(warnings),
-            })
-
-        if "Mark1" in deltas and "Mark2" in deltas:
-            dx1, dy1 = deltas["Mark1"]
-            dx2, dy2 = deltas["Mark2"]
-            l_value = max(self.config.rz_distance_l_um, 1e-12)
-            if self.config.rz_layout == "Y向前后分布":
-                rz_rad = (dx2 - dx1) / l_value
-                formula = "Rz=(Dx2-Dx1)/L"
-            else:
-                rz_rad = (dy2 - dy1) / l_value
-                formula = "Rz=(Dy2-Dy1)/L"
-            rz_urad = rz_rad * 1_000_000.0
-            rows.append({
-                "项目": "Rz",
-                "Rz(μrad)": rz_urad,
-                "公式": formula,
-                "L(μm)": l_value,
-                "判定": "试测" if self._is_auto_workflow() and self.config.recipe_validation_status != "Validated" else ("不通过" if abs(rz_urad) > self.config.rz_limit else "通过"),
-                "提示": "未验证配方，不作正式判定" if self._is_auto_workflow() and self.config.recipe_validation_status != "Validated" else ("Rz超限" if abs(rz_urad) > self.config.rz_limit else ""),
-            })
-        return rows
+        is_trial = self._is_auto_workflow() and self.config.recipe_validation_status != "Validated"
+        return build_summary_rows(overlay_map, self.config, is_trial=is_trial)
 
 
     def _set_result_card(self, value_label: QLabel, unit_label: QLabel, value: str, unit: str, color: str = "#1D1D1F"):
@@ -2558,6 +2521,31 @@ class MainWindow(QMainWindow):
         self.workflow_status_dot.setStyleSheet(f"color: {status_color};")
         self.workflow_status_label.setText(status_text)
 
+    def _refresh_algorithm_path_panel(self, current_mark: str, show_auto: bool):
+        if not hasattr(self, "algorithm_path_button"):
+            return
+        workflow = "Auto" if show_auto else "Manual"
+        reference_label = self.auto_reference_combo.currentData() or "" if hasattr(self, "auto_reference_combo") else ""
+        target_label = self.auto_target_combo.currentData() or "" if hasattr(self, "auto_target_combo") else ""
+        if show_auto:
+            reference = self._find_auto_detection(current_mark, reference_label) if reference_label else None
+            target = self._find_auto_detection(current_mark, target_label) if target_label else None
+        else:
+            reference = self._find_manual_detection(current_mark, reference_label) if reference_label else None
+            target = self._find_manual_detection(current_mark, target_label) if target_label else None
+
+        if reference is None and target is None:
+            self.algorithm_path_text = "暂无测量结果；分析 ROI 或自动识别后可查看实际算法路径。"
+            self.algorithm_path_button.setToolTip(self.algorithm_path_text)
+            return
+        parts = [f"当前 {current_mark}"]
+        if reference is not None:
+            parts.append(f"基准({reference_label})：{describe_algorithm_path(reference, workflow)}")
+        if target is not None:
+            parts.append(f"待测({target_label})：{describe_algorithm_path(target, workflow)}")
+        self.algorithm_path_text = "；".join(parts)
+        self.algorithm_path_button.setToolTip(self.algorithm_path_text)
+
     def _refresh_tables(self):
         det_headers = [
             "标记", "层", "中心 X (μm)", "中心 Y (μm)",
@@ -2567,46 +2555,60 @@ class MainWindow(QMainWindow):
         det_rows = []
         display_detections = self._display_detections()
         manual_labels = self._manual_detection_labels()
-        mean_scale = 0.5 * (self.config.pixel_size_x_um + self.config.pixel_size_y_um)
         for mark_id, layer_map in display_detections.items():
             for layer, d in layer_map.items():
                 if d.fitting_mode == "Rectangle":
+                    width_um, height_um = rotated_rect_size_um(
+                        d.shape_params.get("width_px", 0),
+                        d.shape_params.get("height_px", 0),
+                        d.shape_params.get("angle_deg", 0),
+                        self.config,
+                    )
                     shape_txt = (
-                        f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.3f}μm, "
-                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm, "
+                        f"宽={width_um:.3f}μm, "
+                        f"高={height_um:.3f}μm, "
                         f"角度={d.shape_params.get('angle_deg', 0):.3f}°"
                     )
                 elif d.fitting_mode == "Ellipse":
+                    angle_deg = d.shape_params.get("angle_deg", 0)
+                    major_um = d.shape_params.get("major_px", 0) * axis_scale_um_per_px(self.config, angle_deg)
+                    minor_um = d.shape_params.get("minor_px", 0) * axis_scale_um_per_px(self.config, angle_deg + 90.0)
                     shape_txt = (
-                        f"长轴={d.shape_params.get('major_px', 0) * mean_scale:.3f}μm, "
-                        f"短轴={d.shape_params.get('minor_px', 0) * mean_scale:.3f}μm, "
+                        f"长轴={major_um:.3f}μm, "
+                        f"短轴={minor_um:.3f}μm, "
                         f"角度={d.shape_params.get('angle_deg', 0):.3f}°"
                     )
                 elif d.fitting_mode == "Circle":
-                    shape_txt = f"半径={d.shape_params.get('radius_px', 0) * mean_scale:.3f}μm"
+                    shape_txt = f"半径={d.diameter_um / 2.0:.3f}μm"
                 elif d.fitting_mode == "EdgeCenter":
                     shape_txt = (
-                        f"边缘中心, 参考半径={d.shape_params.get('radius_px', 0) * mean_scale:.3f}μm, "
+                        f"边缘中心, 参考半径={d.diameter_um / 2.0:.3f}μm, "
                         f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.3f}μm, "
                         f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm"
                     )
                 elif d.fitting_mode == "CaliperCircle":
                     shape_txt = (
-                        f"卡尺圆, 半径={d.shape_params.get('radius_px', 0) * mean_scale:.3f}μm, "
+                        f"卡尺圆, 半径={d.diameter_um / 2.0:.3f}μm, "
                         f"内点={d.shape_params.get('inlier_count', 0)}, "
                         f"剔除={d.shape_params.get('rejected_count', 0)}, "
                         f"卡尺={d.shape_params.get('caliper_count', 0)}"
                     )
                 elif d.fitting_mode == "ProductionRectangle":
+                    width_um, height_um = rotated_rect_size_um(
+                        d.shape_params.get("width_px", 0),
+                        d.shape_params.get("height_px", 0),
+                        d.shape_params.get("angle_deg", 0),
+                        self.config,
+                    )
                     shape_txt = (
-                        f"方形精测, 宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.3f}μm, "
-                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm, "
+                        f"方形精测, 宽={width_um:.3f}μm, "
+                        f"高={height_um:.3f}μm, "
                         f"角度={d.shape_params.get('angle_deg', 0):.3f}°"
                     )
                 elif d.fitting_mode in {"AutoCircle", "AutoRectangle", "ProductionCircle"}:
                     shape_type = "方形精测" if d.fitting_mode == "ProductionRectangle" else ("圆形精测" if d.fitting_mode == "ProductionCircle" else ("方形轮廓" if d.fitting_mode == "AutoRectangle" else "圆形轮廓"))
                     shape_txt = (
-                        f"{shape_type}, 参考半径={d.shape_params.get('radius_px', 0) * mean_scale:.3f}μm, "
+                        f"{shape_type}, 参考半径={d.diameter_um / 2.0:.3f}μm, "
                         f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.3f}μm, "
                         f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm"
                     )
@@ -2845,10 +2847,8 @@ class MainWindow(QMainWindow):
                 if detection.shape_params.get("quality_status") != "Valid":
                     continue
                 shape = "方" if detection.fitting_mode == "ProductionRectangle" else "圆"
-                radius = detection.shape_params.get("radius_px", detection.diameter_px / 2.0)
                 size_name = "半尺寸" if detection.fitting_mode in {"AutoRectangle", "ProductionRectangle"} else "半径"
-                mean_scale = 0.5 * (self.config.pixel_size_x_um + self.config.pixel_size_y_um)
-                text = f"{mark_id}-{label} - {shape} - {size_name}={radius * mean_scale:.3f} μm"
+                text = f"{mark_id}-{label} - {shape} - {size_name}={detection.diameter_um / 2.0:.3f} μm"
                 if self._matches_auto_rule(detection, "reference", mark):
                     self.auto_reference_combo.addItem(text, label)
                 if self._matches_auto_rule(detection, "target", mark):
@@ -2912,15 +2912,20 @@ class MainWindow(QMainWindow):
         candidates = {}
         try:
             results_all = []
+            report_warnings = []
             for layer, image in images:
                 try:
-                    results = detect_auto_marks(
+                    report = detect_auto_marks_with_report(
                         image.gray,
                         layer,
                         self.params,
                         self.config.pixel_size_x_um,
                         self.config.pixel_size_y_um,
                     )
+                    results = report.results
+                    warning_text = report.warning_text()
+                    if warning_text:
+                        report_warnings.append(f"{LAYER_LABELS.get(layer, layer)}：{warning_text}")
                 except Exception as exc:
                     self._append_log(f"自动识别 {mark_id} {LAYER_LABELS.get(layer, layer)} 失败：{self._friendly_error(exc)}")
                     results = []
@@ -2943,6 +2948,7 @@ class MainWindow(QMainWindow):
                     measured.shape_params["quality_status"] = "Invalid"
                     measured.shape_params["failure_reason"] = f"精测失败：{self._friendly_error(exc)}"
                     measured.warning = measured.shape_params["failure_reason"]
+                    measured = attach_algorithm_path(measured, "Auto")
                 if not (self.params.diameter_min_um <= measured.diameter_um <= self.params.diameter_max_um):
                     measured.shape_params["quality_status"] = "Invalid"
                     measured.shape_params["failure_reason"] = "尺寸超出配方范围"
@@ -2956,16 +2962,27 @@ class MainWindow(QMainWindow):
             self.auto_selections[mark_id] = {"reference_label": "", "target_label": ""}
             self._refresh_auto_selection_combos()
             self._refresh_all_widgets()
+            if report_warnings:
+                self._append_log("；".join(report_warnings))
             if show_message:
                 if detected:
                     valid_count = sum(
                         next(iter(layer_map.values())).shape_params.get("quality_status") == "Valid"
                         for layer_map in detected.values()
                     )
-                    QMessageBox.information(self, "自动精测完成", f"共发现 {len(detected)} 个候选，精测有效 {valid_count} 个。")
+                    message = f"共发现 {len(detected)} 个候选，精测有效 {valid_count} 个。"
+                    if report_warnings:
+                        message += "\n\n提示：\n" + "\n".join(report_warnings)
+                    QMessageBox.information(self, "自动精测完成", message)
                 else:
-                    QMessageBox.warning(self, "自动识别", "未找到可用的闭合 Mark 轮廓，请检查对比度、焦面、ROI/算法参数或改用手动 ROI。")
-            self.statusBar().showMessage(f"自动识别完成：{len(detected)} 个候选", 5000)
+                    message = "未找到可用的闭合 Mark 轮廓，请检查对比度、焦面、ROI/算法参数或改用手动 ROI。"
+                    if report_warnings:
+                        message += "\n\n提示：\n" + "\n".join(report_warnings)
+                    QMessageBox.warning(self, "自动识别", message)
+            status_message = f"自动识别完成：{len(detected)} 个候选"
+            if report_warnings:
+                status_message += "；存在截断提示"
+            self.statusBar().showMessage(status_message, 5000)
             return len(detected)
         finally:
             QApplication.restoreOverrideCursor()
@@ -3397,102 +3414,7 @@ class MainWindow(QMainWindow):
         if roi is None:
             raise ValueError(f"{mark.mark_id} {LAYER_LABELS[layer]} ROI 未设置")
         roi = self._coerce_roi_to_auto_ring(roi, layer)
-
-        if getattr(roi, "roi_type", "") == "Caliper Circle":
-            cal = detect_caliper_circle(img.gray, roi, self.params)
-            mean_px = 0.5 * (self.config.pixel_size_x_um + self.config.pixel_size_y_um)
-            return DetectionResult(
-                mark_id=mark.mark_id,
-                layer=layer,
-                center_x_px=cal.center_x_px,
-                center_y_px=cal.center_y_px,
-                center_x_um=cal.center_x_px * self.config.pixel_size_x_um,
-                center_y_um=cal.center_y_px * self.config.pixel_size_y_um,
-                diameter_px=2.0 * cal.radius_px,
-                diameter_um=2.0 * cal.radius_px * mean_px,
-                residual_px=cal.residual_px,
-                residual_um=cal.residual_px * mean_px,
-                edge_point_count=len(cal.edge_points),
-                confidence=cal.confidence,
-                fitting_mode="CaliperCircle",
-                warning="",
-                edge_points=[(float(x), float(y)) for x, y in cal.edge_points],
-                rejected_points=[(float(x), float(y)) for x, y in cal.rejected_points],
-                edge_gradients=[float(g) for g in cal.gradients],
-                rejected_gradients=[float(g) for g in cal.rejected_gradients],
-                shape_params={
-                    "radius_px": cal.radius_px,
-                    "inlier_count": int(len(cal.edge_points)),
-                    "rejected_count": int(len(cal.rejected_points)),
-                    "caliper_count": int(getattr(roi, "caliper_count", 64)),
-                    "caliper_width_px": float(getattr(roi, "caliper_width_px", 8.0)),
-                    "search_direction": getattr(roi, "search_direction", "Inner to Outer"),
-                    "roi_type": getattr(roi, "roi_type", "Caliper Circle"),
-                    "roi_inner_ratio": float(getattr(roi, "inner_ratio", 0.0)),
-                    "roi_inner_radius_px": float(roi.inner_radius()),
-                    "roi_outer_radius_px": float(roi.outer_radius()),
-                    "roi_target_edge": getattr(roi, "target_edge", "All Edges"),
-                    "roi_angle_deg": float(getattr(roi, "angle_deg", 0.0)),
-                    "caliper_windows": cal.caliper_windows,
-                },
-            )
-
-        layer_fit_mode = (
-            getattr(self.params, "upper_fitting_mode", self.params.fitting_mode)
-            if layer == "upper"
-            else getattr(self.params, "lower_fitting_mode", self.params.fitting_mode)
-        )
-        detect_params = replace(self.params, fitting_mode=layer_fit_mode)
-
-        if detect_params.fitting_mode == "RegionCenter":
-            # True Z-stack style region-center path: segment the target area in the ROI
-            # and calculate the center from the segmented region. This bypasses Canny /
-            # subpixel edge extraction, so rounded square holes can be measured even
-            # when edge points are weak or discontinuous.
-            fit = detect_region_center(img.gray, roi, detect_params)
-            used_points = np.asarray(fit.shape_params.get("contour_points", []), dtype=np.float64)
-            edge_warning = ""
-        else:
-            edges = detect_subpixel_edges(img.gray, roi, detect_params)
-            if len(edges.points_xy) < detect_params.min_edge_points:
-                raise ValueError(
-                    f"{mark.mark_id} {LAYER_LABELS[layer]} 有效边缘点不足：{len(edges.points_xy)} < {detect_params.min_edge_points}. "
-                    f"可以尝试放大 ROI、降低 Canny/最小梯度，或检查焦面和对比度。"
-                )
-            fit = fit_mark_shape(edges.points_xy, detect_params)
-            used_points = edges.points_xy
-            if fit.inlier_mask is not None and len(fit.inlier_mask) == len(edges.points_xy):
-                used_points = edges.points_xy[fit.inlier_mask]
-            edge_warning = edges.warning
-
-        px_x = self.config.pixel_size_x_um
-        px_y = self.config.pixel_size_y_um
-        mean_px = 0.5 * (px_x + px_y)
-        det = DetectionResult(
-            mark_id=mark.mark_id,
-            layer=layer,
-            center_x_px=fit.center_x_px,
-            center_y_px=fit.center_y_px,
-            center_x_um=fit.center_x_px * px_x,
-            center_y_um=fit.center_y_px * px_y,
-            diameter_px=fit.diameter_px,
-            diameter_um=fit.diameter_px * mean_px,
-            residual_px=fit.residual_px,
-            residual_um=fit.residual_px * mean_px,
-            edge_point_count=len(used_points),
-            confidence=fit.confidence,
-            fitting_mode=fit.mode,
-            warning=fit.warning or edge_warning,
-            edge_points=[(float(x), float(y)) for x, y in used_points],
-            shape_params={
-                **fit.shape_params,
-                "roi_type": getattr(roi, "roi_type", "Rectangle"),
-                "roi_inner_ratio": float(getattr(roi, "inner_ratio", 0.0)),
-                "roi_target_edge": getattr(roi, "target_edge", "All Edges"),
-                "roi_angle_deg": float(getattr(roi, "angle_deg", 0.0)),
-            },
-        )
-        return det
+        return detect_manual_roi(mark.mark_id, layer, img, roi, self.params, self.config)
 
     def analyze_current_mark(self):
         mark_id = self.mark_combo.currentText()
@@ -3546,11 +3468,10 @@ class MainWindow(QMainWindow):
         if show_message:
             if analyzed:
                 lines = []
-                mean_scale = 0.5 * (self.config.pixel_size_x_um + self.config.pixel_size_y_um)
                 for layer, det in analyzed:
                     radius_px = det.shape_params.get("radius_px")
                     if radius_px is not None:
-                        detail = f"半径={radius_px * mean_scale:.3f} μm"
+                        detail = f"半径={det.diameter_um / 2.0:.3f} μm"
                     else:
                         detail = f"尺寸={det.diameter_um:.3f} μm"
                     lines.append(f"{mark_id} {LAYER_LABELS.get(layer, layer)}：中心=({det.center_x_um:.3f}, {det.center_y_um:.3f}) μm，{detail}")

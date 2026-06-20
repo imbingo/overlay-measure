@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import List, Tuple
 import time
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -10,6 +11,30 @@ from .circle_ellipse_fitter import fit_circle_ransac
 from .image_loader import normalize_to_uint8
 from .models import DetectionParams, DetectionResult, Roi
 from .subpixel_edge_detector import _bilinear_sample, _quadratic_peak_offset, detect_subpixel_edges
+
+
+@dataclass
+class AutoDetectReport:
+    results: List[DetectionResult]
+    processed_contours: int
+    selected_contours: int
+    total_contours: int
+    max_contours_per_mask: int
+    max_results: int
+    time_limit_s: float
+    truncated_by_time: bool = False
+    truncated_by_contour_limit: bool = False
+    truncated_by_result_limit: bool = False
+
+    def warning_text(self) -> str:
+        warnings = []
+        if self.truncated_by_time:
+            warnings.append(f"自动识别达到 {self.time_limit_s:.1f}s 时间上限，结果可能只包含最大候选")
+        if self.truncated_by_contour_limit:
+            warnings.append(f"轮廓过多，仅处理每个阈值方向面积最大的 {self.max_contours_per_mask} 个")
+        if self.truncated_by_result_limit:
+            warnings.append(f"候选达到上限 {self.max_results} 个，后续候选已跳过")
+        return "；".join(warnings)
 
 
 def _refine_contour_points(gray: np.ndarray, contour: np.ndarray, params: DetectionParams) -> Tuple[np.ndarray, np.ndarray]:
@@ -146,7 +171,9 @@ def _split_overlapping_rectangles(points: np.ndarray) -> List[np.ndarray]:
         previous = approximate[index - 1]
         current = approximate[index]
         following = approximate[(index + 1) % len(approximate)]
-        cross_products.append(float(np.cross(current - previous, following - current)))
+        v1 = current - previous
+        v2 = following - current
+        cross_products.append(float(v1[0] * v2[1] - v1[1] * v2[0]))
     nonzero = [value for value in cross_products if abs(value) > 1e-6]
     if not nonzero:
         return []
@@ -238,13 +265,13 @@ def _detect_complete_circles(
     return results
 
 
-def detect_auto_marks(
+def detect_auto_marks_with_report(
     gray: np.ndarray,
     layer: str,
     params: DetectionParams,
     pixel_size_x_um: float,
     pixel_size_y_um: float,
-) -> List[DetectionResult]:
+) -> AutoDetectReport:
     """Find closed dark or bright mark contours and refine their edge coordinates."""
     image_u8 = normalize_to_uint8(gray)
     blurred = cv2.GaussianBlur(image_u8, (5, 5), 1.0)
@@ -271,15 +298,31 @@ def detect_auto_marks(
     mean_pixel_size = 0.5 * (pixel_size_x_um + pixel_size_y_um)
     max_contours_per_mask = 96
     max_results = 48
-    deadline = time.perf_counter() + 4.0
+    time_limit_s = 4.0
+    deadline = time.perf_counter() + time_limit_s
+    total_contours = 0
+    selected_contours = 0
+    processed_contours = 0
+    truncated_by_contour_limit = False
+    truncated_by_time = False
+    truncated_by_result_limit = False
     for mask in masks:
         contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        total_contours += len(contours)
+        if len(contours) > max_contours_per_mask:
+            truncated_by_contour_limit = True
         # Large noisy images can produce thousands of contours. Sort by area and
         # process only the most relevant ones to keep the GUI responsive.
         contours = sorted(contours, key=lambda c: abs(float(cv2.contourArea(c))), reverse=True)[:max_contours_per_mask]
+        selected_contours += len(contours)
         for contour in contours:
-            if len(results) >= max_results or time.perf_counter() > deadline:
+            if len(results) >= max_results:
+                truncated_by_result_limit = True
                 break
+            if time.perf_counter() > deadline:
+                truncated_by_time = True
+                break
+            processed_contours += 1
             area = abs(float(cv2.contourArea(contour)))
             perimeter = float(cv2.arcLength(contour, True))
             x, y, width, height = cv2.boundingRect(contour)
@@ -347,6 +390,32 @@ def detect_auto_marks(
                         },
                     )
                 )
-        if time.perf_counter() > deadline:
+        if len(results) >= max_results:
+            truncated_by_result_limit = True
             break
-    return sorted(results, key=lambda result: result.shape_params.get("radius_px", 0.0), reverse=True)
+        if time.perf_counter() > deadline:
+            truncated_by_time = True
+            break
+    sorted_results = sorted(results, key=lambda result: result.shape_params.get("radius_px", 0.0), reverse=True)
+    return AutoDetectReport(
+        results=sorted_results,
+        processed_contours=processed_contours,
+        selected_contours=selected_contours,
+        total_contours=total_contours,
+        max_contours_per_mask=max_contours_per_mask,
+        max_results=max_results,
+        time_limit_s=time_limit_s,
+        truncated_by_time=truncated_by_time,
+        truncated_by_contour_limit=truncated_by_contour_limit,
+        truncated_by_result_limit=truncated_by_result_limit,
+    )
+
+
+def detect_auto_marks(
+    gray: np.ndarray,
+    layer: str,
+    params: DetectionParams,
+    pixel_size_x_um: float,
+    pixel_size_y_um: float,
+) -> List[DetectionResult]:
+    return detect_auto_marks_with_report(gray, layer, params, pixel_size_x_um, pixel_size_y_um).results

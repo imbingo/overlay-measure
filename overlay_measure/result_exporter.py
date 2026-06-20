@@ -10,6 +10,7 @@ from openpyxl.drawing.image import Image as XlsxImage
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from .measurement_units import axis_scale_um_per_px, mean_pixel_size_um, rotated_rect_size_um, scalar_px_to_um
 from .models import DetectionResult, MeasurementConfig, OverlayResult
 
 
@@ -124,10 +125,18 @@ def build_detection_rows(
 ) -> List[dict]:
     rows = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    mean_scale_um = 0.5 * (config.pixel_size_x_um + config.pixel_size_y_um)
+    mean_scale_um = mean_pixel_size_um(config)
     for mark_id, layer_map in detections.items():
         overlay = overlays.get(mark_id)
         for layer, det in layer_map.items():
+            width_px = det.shape_params.get("width_px")
+            height_px = det.shape_params.get("height_px")
+            angle_deg = float(det.shape_params.get("angle_deg", 0.0))
+            width_um = height_um = None
+            if width_px is not None and height_px is not None:
+                width_um, height_um = rotated_rect_size_um(float(width_px), float(height_px), angle_deg, config)
+            major_px = det.shape_params.get("major_px")
+            minor_px = det.shape_params.get("minor_px")
             row = {
                 "timestamp": now,
                 "measurement_mode": _mode_cn(config.mode),
@@ -155,18 +164,18 @@ def build_detection_rows(
                 "failure_reason": det.shape_params.get("failure_reason"),
                 "recipe_validation_status": {"Draft": "草稿/未验证", "Validated": "已验证/正式生产"}.get(det.shape_params.get("recipe_validation_status"), det.shape_params.get("recipe_validation_status", "")),
                 "detection_warning": det.warning,
-                "shape_width_um": det.shape_params.get("width_px") * config.pixel_size_x_um if det.shape_params.get("width_px") is not None else None,
-                "shape_height_um": det.shape_params.get("height_px") * config.pixel_size_y_um if det.shape_params.get("height_px") is not None else None,
-                "shape_major_um": det.shape_params.get("major_px") * mean_scale_um if det.shape_params.get("major_px") is not None else None,
-                "shape_minor_um": det.shape_params.get("minor_px") * mean_scale_um if det.shape_params.get("minor_px") is not None else None,
+                "shape_width_um": width_um,
+                "shape_height_um": height_um,
+                "shape_major_um": major_px * axis_scale_um_per_px(config, angle_deg) if major_px is not None else None,
+                "shape_minor_um": minor_px * axis_scale_um_per_px(config, angle_deg + 90.0) if minor_px is not None else None,
                 "shape_angle_deg": det.shape_params.get("angle_deg"),
                 "shape_aspect_ratio": det.shape_params.get("aspect_ratio"),
                 "roi_type": _roi_cn(det.shape_params.get("roi_type")),
                 "roi_inner_ratio": det.shape_params.get("roi_inner_ratio"),
-                "roi_inner_radius_um": det.shape_params.get("roi_inner_radius_px") * mean_scale_um if det.shape_params.get("roi_inner_radius_px") is not None else None,
-                "roi_outer_radius_um": det.shape_params.get("roi_outer_radius_px") * mean_scale_um if det.shape_params.get("roi_outer_radius_px") is not None else None,
+                "roi_inner_radius_um": scalar_px_to_um(det.shape_params.get("roi_inner_radius_px"), config) if det.shape_params.get("roi_inner_radius_px") is not None else None,
+                "roi_outer_radius_um": scalar_px_to_um(det.shape_params.get("roi_outer_radius_px"), config) if det.shape_params.get("roi_outer_radius_px") is not None else None,
                 "caliper_count": det.shape_params.get("caliper_count"),
-                "caliper_width_um": det.shape_params.get("caliper_width_px") * mean_scale_um if det.shape_params.get("caliper_width_px") is not None else None,
+                "caliper_width_um": scalar_px_to_um(det.shape_params.get("caliper_width_px"), config) if det.shape_params.get("caliper_width_px") is not None else None,
                 "search_direction": _direction_cn(det.shape_params.get("search_direction")),
                 "roi_target_edge": _roi_cn(det.shape_params.get("roi_target_edge")),
                 "roi_angle_deg": det.shape_params.get("roi_angle_deg"),

@@ -8,6 +8,8 @@ import numpy as np
 
 from .caliper_circle_detector import _profile_edge, detect_caliper_circle
 from .circle_ellipse_fitter import fit_rectangle
+from .measurement_service import attach_algorithm_path
+from .measurement_units import points_to_um_distances, radial_diameter_residual_um, rotated_rect_size_um, scalar_px_to_um
 from .models import DetectionParams, DetectionResult, MeasurementConfig, Roi
 from .subpixel_edge_detector import _bilinear_sample
 
@@ -63,20 +65,23 @@ def refine_circle_candidate(
         "Inner to Outer",
     )
     precise = detect_caliper_circle(gray, roi, params)
-    mean_scale = 0.5 * (config.pixel_size_x_um + config.pixel_size_y_um)
     count = max(1, int(config.production_caliper_count))
     found_count = len(precise.edge_points) + len(precise.rejected_points)
     coverage = len(precise.edge_points) / count
     rejected_ratio = len(precise.rejected_points) / max(1, found_count)
-    distances = np.hypot(
-        precise.edge_points[:, 0] - precise.center_x_px,
-        precise.edge_points[:, 1] - precise.center_y_px,
+    diameter_um, residual_um = radial_diameter_residual_um(
+        precise.edge_points,
+        precise.center_x_px,
+        precise.center_y_px,
+        precise.radius_px,
+        precise.residual_px,
+        config,
     )
-    max_deviation_px = float(np.max(np.abs(distances - precise.radius_px))) if len(distances) else float("inf")
-    residual_um = precise.residual_px * mean_scale
-    max_deviation_um = max_deviation_px * mean_scale
+    distances_um = points_to_um_distances(precise.edge_points, precise.center_x_px, precise.center_y_px, config)
+    radius_um = 0.5 * diameter_um
+    max_deviation_um = float(np.max(np.abs(distances_um - radius_um))) if len(distances_um) else float("inf")
     quality_status, reason = _quality(residual_um, coverage, rejected_ratio, max_deviation_um, config)
-    return DetectionResult(
+    detection = DetectionResult(
         mark_id=candidate.mark_id,
         layer=candidate.layer,
         center_x_px=precise.center_x_px,
@@ -84,7 +89,7 @@ def refine_circle_candidate(
         center_x_um=precise.center_x_px * config.pixel_size_x_um,
         center_y_um=precise.center_y_px * config.pixel_size_y_um,
         diameter_px=2.0 * precise.radius_px,
-        diameter_um=2.0 * precise.radius_px * mean_scale,
+        diameter_um=diameter_um,
         residual_px=precise.residual_px,
         residual_um=residual_um,
         edge_point_count=len(precise.edge_points),
@@ -119,6 +124,7 @@ def refine_circle_candidate(
             "recipe_validation_status": config.recipe_validation_status,
         },
     )
+    return attach_algorithm_path(detection, "Auto")
 
 
 def _rectangle_caliper_points(
@@ -233,14 +239,19 @@ def refine_rectangle_candidate(
         inliers = points
         rejected = np.empty((0, 2), dtype=np.float64)
         mask = np.ones(len(points), dtype=bool)
-    mean_scale = 0.5 * (config.pixel_size_x_um + config.pixel_size_y_um)
     total_expected = max(1, 4 * max(4, int(np.ceil(config.production_caliper_count / 4.0))))
     coverage = len(inliers) / total_expected
     rejected_ratio = len(rejected) / max(1, len(points))
-    residual_um = fit.residual_px * mean_scale
-    max_deviation_um = float(np.max(errors[mask]) * mean_scale) if np.any(mask) else float("inf")
+    width_um, height_um = rotated_rect_size_um(
+        float(fit.shape_params.get("width_px", fit.diameter_px)),
+        float(fit.shape_params.get("height_px", fit.diameter_px)),
+        float(fit.shape_params.get("angle_deg", 0.0)),
+        config,
+    )
+    residual_um = scalar_px_to_um(fit.residual_px, config)
+    max_deviation_um = scalar_px_to_um(float(np.max(errors[mask])), config) if np.any(mask) else float("inf")
     quality_status, reason = _quality(residual_um, coverage, rejected_ratio, max_deviation_um, config)
-    return DetectionResult(
+    detection = DetectionResult(
         mark_id=candidate.mark_id,
         layer=candidate.layer,
         center_x_px=fit.center_x_px,
@@ -248,7 +259,7 @@ def refine_rectangle_candidate(
         center_x_um=fit.center_x_px * config.pixel_size_x_um,
         center_y_um=fit.center_y_px * config.pixel_size_y_um,
         diameter_px=fit.diameter_px,
-        diameter_um=fit.diameter_px * mean_scale,
+        diameter_um=0.5 * (width_um + height_um),
         residual_px=fit.residual_px,
         residual_um=residual_um,
         edge_point_count=len(inliers),
@@ -278,6 +289,7 @@ def refine_rectangle_candidate(
             "recipe_validation_status": config.recipe_validation_status,
         },
     )
+    return attach_algorithm_path(detection, "Auto")
 
 
 def refine_candidate(
@@ -303,4 +315,4 @@ def refine_candidate(
             "failure_reason": failed.warning,
             "recipe_validation_status": config.recipe_validation_status,
         }
-        return failed
+        return attach_algorithm_path(failed, "Auto")
