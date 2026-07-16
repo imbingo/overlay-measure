@@ -6,6 +6,8 @@ import pytest
 
 from overlay_measure.image_loader import load_image
 from overlay_measure.measurement_service import detect_manual_roi, describe_algorithm_path
+from overlay_measure.measurement_engine import run_measurement_job
+from overlay_measure.models import MarkRecipe
 from overlay_measure.overlay_calculator import calculate_overlay
 from overlay_measure.recipe_manager import load_recipe
 
@@ -67,3 +69,34 @@ def test_algorithm_path_explains_manual_circle_pipeline():
     assert "手动ROI" in path
     assert "亚像素边缘" in path
     assert "RANSAC圆拟合" in path
+
+
+def test_background_engine_reuses_main_measurement_service():
+    config, params, marks = load_recipe(str(SAMPLE_DIR / "demo_recipe.json"))
+    config.workflow_mode = "Manual"
+    upper = load_image(str(SAMPLE_DIR / "sample_upper.png"))
+    lower = load_image(str(SAMPLE_DIR / "sample_lower.png"))
+    payload = run_measurement_job(
+        {
+            "config": config,
+            "params": params,
+            "marks": {"Mark1": marks[0], "Mark2": MarkRecipe("Mark2")},
+            "mark_images": {
+                "Mark1": {"upper": upper, "lower": lower},
+                "Mark2": {"upper": None, "lower": None},
+            },
+            "batch_images": {
+                "Mark1": {"upper": [], "lower": []},
+                "Mark2": {"upper": [], "lower": []},
+            },
+            "selections": {"Mark1": {}, "Mark2": {}},
+            "batch": False,
+        },
+        lambda done, total, text: None,
+        lambda: False,
+    )
+    overlay = payload["overlays"]["Mark1"]
+    # The production UI defines overlay as selected target minus selected reference.
+    assert overlay.delta_x_um == pytest.approx(-0.2417, abs=0.02)
+    assert overlay.delta_y_um == pytest.approx(-0.2528, abs=0.02)
+    assert "亚像素边缘" in payload["detections"]["Mark1"]["upper"].shape_params["algorithm_path"]

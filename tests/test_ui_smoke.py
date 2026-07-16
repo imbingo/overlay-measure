@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import os
+import time
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
 from overlay_measure.ui_main import MainWindow
+from overlay_measure.image_loader import load_image
+from overlay_measure.models import MarkRecipe
+from overlay_measure.recipe_manager import load_recipe
+
+
+SAMPLE_DIR = Path(__file__).resolve().parents[1] / "sample_data"
 
 
 def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
@@ -15,7 +23,7 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     window.show()
     app.processEvents()
 
-    assert "V1.5.3" in window.windowTitle()
+    assert "V1.5.4" in window.windowTitle()
     assert window.algorithm_path_button.text() == "算法路径"
     assert not window.display_enhance_check.isChecked()
     assert window.result_tabs.count() == 3
@@ -39,5 +47,37 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     assert captured["title"] == "算法路径"
     assert "暂无测量结果" in captured["text"]
 
+    window.close()
+    app.processEvents()
+
+
+def test_background_calculation_keeps_qt_event_loop_responsive(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    config, params, marks = load_recipe(str(SAMPLE_DIR / "demo_recipe.json"))
+    config.workflow_mode = "Manual"
+    window.config = config
+    window.params = params
+    window.marks = {"Mark1": marks[0], "Mark2": MarkRecipe("Mark2")}
+    window.mark_images["Mark1"] = {
+        "upper": load_image(str(SAMPLE_DIR / "sample_upper.png")),
+        "lower": load_image(str(SAMPLE_DIR / "sample_lower.png")),
+    }
+    window.roi_sources["Mark1"] = {"upper": "manual", "lower": "manual"}
+    window._push_config_to_ui()
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: QMessageBox.Ok)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.Ok)
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: QMessageBox.Ok)
+
+    window.analyze_all_marks()
+    assert window._calculation_running
+    deadline = time.monotonic() + 10.0
+    while window._calculation_running and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert not window._calculation_running
+    assert "Mark1" in window.overlays
+    assert not window.progress_bar.isVisible()
     window.close()
     app.processEvents()

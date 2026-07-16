@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,7 +9,7 @@ from typing import Dict, Optional
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, QThread, Qt, Signal, Slot
 from PySide6.QtGui import QAction, QColor, QFont, QFontDatabase, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
@@ -41,7 +41,9 @@ from PySide6.QtWidgets import (
 )
 
 from .auto_mark_detector import detect_auto_marks_with_report
-from .image_loader import load_image, normalize_to_uint8, raw_to_uint8
+from .export_naming import build_export_filename
+from .image_loader import display_to_uint8, load_image
+from .measurement_engine import run_measurement_job
 from .measurement_service import attach_algorithm_path, describe_algorithm_path, detect_manual_roi
 from .measurement_units import axis_scale_um_per_px, rotated_rect_size_um
 from .models import DetectionParams, DetectionResult, ImageData, MarkRecipe, MeasurementConfig, OverlayResult, Roi
@@ -168,7 +170,7 @@ class ImageCanvas(QLabel):
         self.pixmap_cache = None
         self.reset_view(update=False)
         if image is not None:
-            self.pixmap_cache = self._make_pixmap(image.gray)
+            self.pixmap_cache = self._make_pixmap(image)
             self.setText("")
         else:
             self.setText("等待导入图像")
@@ -180,7 +182,7 @@ class ImageCanvas(QLabel):
             return
         self.display_enhancement = enabled
         if self.image is not None:
-            self.pixmap_cache = self._make_pixmap(self.image.gray)
+            self.pixmap_cache = self._make_pixmap(self.image)
         self.update()
 
     def set_context(
@@ -257,8 +259,8 @@ class ImageCanvas(QLabel):
         self.setCursor(Qt.CrossCursor if enabled else Qt.ArrowCursor)
         self.update()
 
-    def _make_pixmap(self, gray: np.ndarray) -> QPixmap:
-        u8 = normalize_to_uint8(gray) if self.display_enhancement else raw_to_uint8(gray)
+    def _make_pixmap(self, image: ImageData) -> QPixmap:
+        u8 = display_to_uint8(image, self.display_enhancement)
         h, w = u8.shape
         qimg = QImage(u8.data, w, h, w, QImage.Format_Grayscale8).copy()
         return QPixmap.fromImage(qimg)
@@ -1209,6 +1211,39 @@ class RepeatabilityPlot(QWidget):
         painter.end()
 
 
+class MeasurementWorker(QObject):
+    progress = Signal(int, int, str)
+    finished = Signal(object)
+    failed = Signal(str)
+    cancelled = Signal()
+
+    def __init__(self, job: dict):
+        super().__init__()
+        self.job = job
+        self._cancel_requested = False
+
+    @Slot()
+    def run(self):
+        try:
+            result = run_measurement_job(
+                self.job,
+                lambda done, total, text: self.progress.emit(done, total, text),
+                lambda: self._cancel_requested,
+            )
+            if self._cancel_requested:
+                self.cancelled.emit()
+            else:
+                self.finished.emit(result)
+        except InterruptedError:
+            self.cancelled.emit()
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+    @Slot()
+    def cancel(self):
+        self._cancel_requested = True
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1216,7 +1251,7 @@ class MainWindow(QMainWindow):
             if font_path.exists() and QFontDatabase.addApplicationFont(str(font_path)) >= 0:
                 break
         self.setFont(QFont("Microsoft YaHei UI", 9))
-        self.setWindowTitle("对位偏差测量软件 V1.5.3")
+        self.setWindowTitle("对位偏差测量软件 V1.5.4")
         self.resize(1500, 920)
 
         self.config = MeasurementConfig()
@@ -1249,11 +1284,35 @@ class MainWindow(QMainWindow):
             "Mark2": {"upper": [], "lower": []},
         }
         self.batch_overlays: Dict[str, list[OverlayResult]] = {"Mark1": [], "Mark2": []}
+        self.batch_run_records: Dict[str, list[dict]] = {"Mark1": [], "Mark2": []}
+        self.roi_sources = self._empty_roi_sources()
+        self.loaded_recipe_path = ""
+        self.loaded_recipe_display_name = ""
+        self._recipe_roi_confirmation_signature = None
+        self._calculation_thread: Optional[QThread] = None
+        self._calculation_worker: Optional[MeasurementWorker] = None
+        self._calculation_running = False
 
         self._apply_window_style()
         self._build_ui()
         self._connect_actions()
         self._refresh_all_widgets()
+
+    @staticmethod
+    def _empty_roi_sources() -> dict:
+        return {
+            "Mark1": {"upper": "none", "lower": "none"},
+            "Mark2": {"upper": "none", "lower": "none"},
+        }
+
+    def _roi_source(self, mark_id: Optional[str] = None, layer: Optional[str] = None) -> str:
+        mark_id = mark_id or self._current_mark_id()
+        layer = layer or self._current_layer()
+        return self.roi_sources.get(mark_id, {}).get(layer, "none")
+
+    @staticmethod
+    def _roi_source_text(source: str) -> str:
+        return {"recipe": "配方 ROI", "manual": "本次手动 ROI", "none": "未设置"}.get(source, "未设置")
 
 
     def _apply_window_style(self):
@@ -1298,7 +1357,7 @@ class MainWindow(QMainWindow):
         title_row.setSpacing(10)
         self.title_label = QLabel("对位偏差测量软件")
         self.title_label.setObjectName("titleLabel")
-        self.version_label = QLabel("V1.5.3")
+        self.version_label = QLabel("V1.5.4")
         self.version_label.setObjectName("versionLabel")
         title_row.addWidget(self.title_label)
         title_row.addWidget(self.version_label)
@@ -1423,7 +1482,6 @@ class MainWindow(QMainWindow):
         self._install_algorithm_path_status_button()
 
     def _install_progress_status_widgets(self):
-        self.cancel_requested = False
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -1434,7 +1492,7 @@ class MainWindow(QMainWindow):
         self.progress_stage_label.setVisible(False)
         self.cancel_progress_btn = QPushButton("取消计算")
         self.cancel_progress_btn.setVisible(False)
-        self.cancel_progress_btn.clicked.connect(self._request_cancel_calculation)
+        self.cancel_progress_btn.clicked.connect(self.cancel_calculation)
         self.statusBar().addPermanentWidget(self.progress_stage_label)
         self.statusBar().addPermanentWidget(self.progress_bar)
         self.statusBar().addPermanentWidget(self.cancel_progress_btn)
@@ -1648,6 +1706,9 @@ class MainWindow(QMainWindow):
         self.layer_combo.addItem("下层", "lower")
         form_mark.addRow("Mark编号", self.mark_combo)
         form_mark.addRow("当前层", self.layer_combo)
+        self.roi_source_label = QLabel("未设置")
+        self.roi_source_label.setObjectName("statusCaption")
+        form_mark.addRow("当前 ROI 来源", self.roi_source_label)
         layout.addWidget(group_mark)
 
         group_auto = QGroupBox("ROI 设置方式")
@@ -1662,12 +1723,16 @@ class MainWindow(QMainWindow):
         self.auto_calculate_btn.setVisible(False)
         self.diagnostic_check = QCheckBox("显示诊断信息（原始轮廓 / 边缘点）")
         self.production_status_label = QLabel("自动模式：正式精测结果")
+        self.workflow_explanation_label = QLabel("手动 ROI 测量会使用当前 Mark 各层已设置的 ROI。")
+        self.workflow_explanation_label.setWordWrap(True)
+        self.workflow_explanation_label.setObjectName("statusCaption")
         form_auto.addRow("工作方式", self.workflow_combo)
         form_auto.addRow(self.auto_detect_btn)
         form_auto.addRow("当前 Mark 基准轮廓", self.auto_reference_combo)
         form_auto.addRow("当前 Mark 待测轮廓", self.auto_target_combo)
         form_auto.addRow(self.diagnostic_check)
         form_auto.addRow(self.production_status_label)
+        form_auto.addRow(self.workflow_explanation_label)
         layout.addWidget(group_auto)
 
         roi_section = CollapsibleSection("环形 ROI 参数", True)
@@ -1719,6 +1784,8 @@ class MainWindow(QMainWindow):
         self.three_point_circle_btn = QPushButton("三点定圆环中心")
         self.three_point_circle_btn.setCheckable(True)
         self.apply_roi_params_btn = QPushButton("应用环形范围")
+        self.clear_current_roi_btn = QPushButton("清除当前层 ROI")
+        self.clear_recipe_rois_btn = QPushButton("清除全部配方 ROI")
         form_roi.addRow("ROI类型", self.roi_type_combo)
         form_roi.addRow("中心 X", self.center_x_spin)
         form_roi.addRow("中心 Y", self.center_y_spin)
@@ -1731,6 +1798,8 @@ class MainWindow(QMainWindow):
         form_roi.addRow("矩形环角度", self.roi_angle_spin)
         form_roi.addRow(self.three_point_circle_btn)
         form_roi.addRow(self.apply_roi_params_btn)
+        form_roi.addRow(self.clear_current_roi_btn)
+        form_roi.addRow(self.clear_recipe_rois_btn)
         roi_section.add_widget(group_roi)
         layout.addWidget(roi_section)
 
@@ -1815,7 +1884,7 @@ class MainWindow(QMainWindow):
         self.fit_mode_combo = SidebarComboBox()
         self.fit_mode_combo.addItem("稳健中心（推荐）", "EdgeCenter")
         self.fit_mode_combo.addItem("区域中心", "RegionCenter")
-        self.fit_mode_combo.addItem("自动识别", "Auto")
+        self.fit_mode_combo.addItem("自动选择拟合模型（仅限 ROI）", "Auto")
         self.fit_mode_combo.addItem("圆拟合", "Circle")
         self.fit_mode_combo.addItem("椭圆拟合", "Ellipse")
         self.fit_mode_combo.addItem("矩形拟合", "Rectangle")
@@ -1824,7 +1893,7 @@ class MainWindow(QMainWindow):
         for combo in (self.upper_fit_mode_combo, self.lower_fit_mode_combo):
             combo.addItem("稳健中心（推荐）", "EdgeCenter")
             combo.addItem("区域中心", "RegionCenter")
-            combo.addItem("自动识别", "Auto")
+            combo.addItem("自动选择拟合模型（仅限 ROI）", "Auto")
             combo.addItem("圆拟合", "Circle")
             combo.addItem("椭圆拟合", "Ellipse")
             combo.addItem("矩形拟合", "Rectangle")
@@ -1963,6 +2032,8 @@ class MainWindow(QMainWindow):
         self.upper_fit_mode_combo.currentTextChanged.connect(self._refresh_all_widgets)
         self.lower_fit_mode_combo.currentTextChanged.connect(self._refresh_all_widgets)
         self.apply_roi_params_btn.clicked.connect(self.apply_roi_params_to_current)
+        self.clear_current_roi_btn.clicked.connect(self.clear_current_roi)
+        self.clear_recipe_rois_btn.clicked.connect(self.clear_all_recipe_rois)
         self.upper_canvas.roiChanged.connect(self.set_roi)
         self.lower_canvas.roiChanged.connect(self.set_roi)
         self.analyze_roi_btn.clicked.connect(self.analyze_roi_regions)
@@ -1989,64 +2060,6 @@ class MainWindow(QMainWindow):
     def _append_log(self, message: str):
         # V1.2.5：取消独立日志窗口，所有操作反馈统一显示在左下角状态栏，避免界面拥挤。
         self.statusBar().showMessage(message, 3500)
-
-    def _request_cancel_calculation(self):
-        self.cancel_requested = True
-        self._append_log("已请求取消计算，当前算法步骤完成后停止。")
-
-    def _begin_long_task(self, message: str, total_steps: int):
-        self.cancel_requested = False
-        self._progress_total = max(1, int(total_steps))
-        self._progress_done = 0
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(True)
-        self.progress_stage_label.setVisible(True)
-        self.cancel_progress_btn.setVisible(True)
-        self.progress_stage_label.setText(message)
-        for button in (
-            self.import_upper_btn,
-            self.import_lower_btn,
-            self.load_recipe_btn,
-            self.save_recipe_btn,
-            self.analyze_all_btn,
-            self.export_btn,
-            self.analyze_roi_btn,
-            self.auto_detect_btn,
-        ):
-            if button is not None:
-                button.setEnabled(False)
-        self._append_log(message)
-        QApplication.processEvents()
-
-    def _update_progress(self, message: str, done_increment: int = 1):
-        total = max(1, getattr(self, "_progress_total", 1))
-        self._progress_done = min(total, getattr(self, "_progress_done", 0) + int(done_increment))
-        percent = int(round(self._progress_done / total * 100))
-        self.progress_bar.setValue(percent)
-        self.progress_stage_label.setText(f"{message}（{self._progress_done}/{total}）")
-        self._append_log(message)
-        QApplication.processEvents()
-
-    def _end_long_task(self, message: str = ""):
-        self.progress_bar.setVisible(False)
-        self.progress_stage_label.setVisible(False)
-        self.cancel_progress_btn.setVisible(False)
-        for button in (
-            self.import_upper_btn,
-            self.import_lower_btn,
-            self.load_recipe_btn,
-            self.save_recipe_btn,
-            self.analyze_all_btn,
-            self.export_btn,
-            self.analyze_roi_btn,
-            self.auto_detect_btn,
-        ):
-            if button is not None:
-                button.setEnabled(True)
-        self._refresh_all_widgets()
-        if message:
-            self._append_log(message)
-        QApplication.processEvents()
 
     def show_algorithm_path_dialog(self):
         text = getattr(self, "algorithm_path_text", "暂无测量结果；分析 ROI 或自动识别后可查看实际算法路径。")
@@ -2340,6 +2353,8 @@ class MainWindow(QMainWindow):
         roi.caliper_count = self.caliper_count_spin.value()
         roi.caliper_width_px = self.caliper_width_spin.value()
         roi.search_direction = self._combo_value(self.search_direction_combo)
+        self.roi_sources.setdefault(mark_id, {})[layer] = "manual"
+        self._recipe_roi_confirmation_signature = None
         if mark_id in self.detections and layer in self.detections[mark_id]:
             del self.detections[mark_id][layer]
         if mark_id in self.overlays:
@@ -2393,6 +2408,14 @@ class MainWindow(QMainWindow):
         roi_caliper_width_px = self.caliper_width_spin.value() if hasattr(self, "caliper_width_spin") else 8.0
         roi_search_direction = self._combo_value(self.search_direction_combo) if hasattr(self, "search_direction_combo") else "Inner to Outer"
         show_auto = self._is_auto_workflow()
+        if hasattr(self, "roi_source_label"):
+            self.roi_source_label.setText(self._roi_source_text(self._roi_source(current_mark, current_layer)))
+        if hasattr(self, "workflow_explanation_label"):
+            self.workflow_explanation_label.setText(
+                "全图自动识别：本次计算不会读取任何 ROI。"
+                if show_auto
+                else "手动 ROI 测量：使用各 Mark、各层当前显示的 ROI；配方 ROI 会在计算前确认。"
+            )
         current_auto_detections = self._current_auto_detections()
         is_validated_recipe = self._combo_value(self.recipe_status_combo) == "Validated" if hasattr(self, "recipe_status_combo") else False
         if hasattr(self, "production_status_label"):
@@ -2464,11 +2487,14 @@ class MainWindow(QMainWindow):
         self.analyze_all_btn.setEnabled(True)
         self.three_point_circle_btn.setEnabled(not show_auto)
         self.apply_roi_params_btn.setEnabled(not show_auto)
+        self.clear_current_roi_btn.setEnabled(not show_auto)
         self._refresh_mark_combo()
         if hasattr(self, "current_recipe_label"):
-            self.current_recipe_label.setText(f"当前配方：{self.recipe_name_edit.text().strip() or '未加载'}")
+            recipe_display = self.loaded_recipe_display_name or self.recipe_name_edit.text().strip() or "未加载"
+            self.current_recipe_label.setText(f"当前配方：{recipe_display}")
         if hasattr(self, "workflow_recipe_label"):
-            self.workflow_recipe_label.setText(f"当前配方：{self.recipe_name_edit.text().strip() or '未加载'}")
+            recipe_display = self.loaded_recipe_display_name or self.recipe_name_edit.text().strip() or "未加载"
+            self.workflow_recipe_label.setText(f"当前配方：{recipe_display}")
         if hasattr(self, "image_status_label"):
             if self.upper_image is None:
                 self.image_status_label.setText("等待导入图像")
@@ -2800,7 +2826,7 @@ class MainWindow(QMainWindow):
         y1 = min(h, int(np.ceil(r.y + r.h + margin)))
         if x1 <= x0 or y1 <= y0:
             return False
-        crop = normalize_to_uint8(image.gray[y0:y1, x0:x1])
+        crop = display_to_uint8(image, enhanced=False)[y0:y1, x0:x1]
         Image.fromarray(crop).save(path)
         return True
 
@@ -2860,28 +2886,43 @@ class MainWindow(QMainWindow):
 
     def _default_export_filename(self) -> str:
         image = self._first_upper_image_for_export()
-        stem = Path(image.path).stem if image is not None and image.path else "Overlay"
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return f"{stem}_Misalignment_Result_{timestamp}.xlsx"
+        return build_export_filename(image.path if image is not None else "")
 
     def _build_repeatability_export_rows(self) -> list[dict]:
         rows: list[dict] = []
         for mark_id in ("Mark1", "Mark2"):
             overlays = self.batch_overlays.get(mark_id, [])
-            upper_images = self.batch_images.get(mark_id, {}).get("upper", [])
-            lower_images = self.batch_images.get(mark_id, {}).get("lower", [])
-            for index, overlay in enumerate(overlays):
-                rows.append({
-                    "Mark": mark_id,
-                    "次数": index + 1,
-                    "上层/单图文件": Path(upper_images[index].path).name if index < len(upper_images) else "",
-                    "下层文件": Path(lower_images[index].path).name if index < len(lower_images) else "",
-                    "Dx(μm)": overlay.delta_x_um,
-                    "Dy(μm)": overlay.delta_y_um,
-                    "Dxy(μm)": overlay.overlay_r_um,
-                    "判定": {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result),
-                    "提示": overlay.warning,
-                })
+            records = list(self.batch_run_records.get(mark_id, []))
+            if records:
+                for record in records:
+                    overlay = record.get("overlay")
+                    error = record.get("error", "")
+                    rows.append({
+                        "Mark": mark_id,
+                        "次数": record.get("run_index", ""),
+                        "上层/单图文件": Path(record.get("upper_file", "")).name,
+                        "下层文件": Path(record.get("lower_file", "")).name,
+                        "Dx(μm)": overlay.delta_x_um if overlay else None,
+                        "Dy(μm)": overlay.delta_y_um if overlay else None,
+                        "Dxy(μm)": overlay.overlay_r_um if overlay else None,
+                        "判定": {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result) if overlay else "失败",
+                        "提示": overlay.warning if overlay else error,
+                    })
+            else:
+                upper_images = self.batch_images.get(mark_id, {}).get("upper", [])
+                lower_images = self.batch_images.get(mark_id, {}).get("lower", [])
+                for index, overlay in enumerate(overlays):
+                    rows.append({
+                        "Mark": mark_id,
+                        "次数": index + 1,
+                        "上层/单图文件": Path(upper_images[index].path).name if index < len(upper_images) else "",
+                        "下层文件": Path(lower_images[index].path).name if index < len(lower_images) else "",
+                        "Dx(μm)": overlay.delta_x_um,
+                        "Dy(μm)": overlay.delta_y_um,
+                        "Dxy(μm)": overlay.overlay_r_um,
+                        "判定": {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result),
+                        "提示": overlay.warning,
+                    })
             if overlays:
                 dxs = np.asarray([o.delta_x_um for o in overlays], dtype=float)
                 dys = np.asarray([o.delta_y_um for o in overlays], dtype=float)
@@ -2923,6 +2964,16 @@ class MainWindow(QMainWindow):
         self._refresh_all_widgets()
 
     def on_workflow_mode_changed(self, *args):
+        self._pull_config_from_ui()
+        if self._is_auto_workflow():
+            # Auto mode always performs a fresh full-image search. Remove stale
+            # candidate overlays so a previous run cannot look current.
+            self.auto_detections_by_mark = {"Mark1": {}, "Mark2": {}}
+            self.auto_candidates_by_mark = {"Mark1": {}, "Mark2": {}}
+            self.auto_overlays.clear()
+            self._append_log("已切换为全图自动识别；本次计算不会使用配方或手动 ROI。")
+        else:
+            self._append_log("已切换为手动 ROI 测量；计算前会确认仍在使用的配方 ROI。")
         self._refresh_auto_selection_combos()
         self._refresh_all_widgets()
 
@@ -3243,6 +3294,8 @@ class MainWindow(QMainWindow):
             self._ensure_mark_runtime(mark_id)
             images = [load_image(path) for path in paths]
             self.batch_images[mark_id][layer] = images
+            self.batch_run_records[mark_id] = []
+            self.batch_overlays[mark_id] = []
             # Use first repeat as preview image so ROI can be drawn/confirmed once.
             if images:
                 self.mark_images[mark_id][layer] = images[0]
@@ -3259,6 +3312,7 @@ class MainWindow(QMainWindow):
     def clear_batch_images(self):
         self.batch_images = {"Mark1": {"upper": [], "lower": []}, "Mark2": {"upper": [], "lower": []}}
         self.batch_overlays = {"Mark1": [], "Mark2": []}
+        self.batch_run_records = {"Mark1": [], "Mark2": []}
         self._refresh_all_widgets()
         self._append_log("已清空批量图像和重复性结果。")
 
@@ -3289,16 +3343,30 @@ class MainWindow(QMainWindow):
         rows = []
         for mark_id in ("Mark1", "Mark2"):
             overlays = self.batch_overlays.get(mark_id, [])
-            for idx, overlay in enumerate(overlays, start=1):
-                rows.append([
-                    mark_id,
-                    str(idx),
-                    f"{overlay.delta_x_um:+.3f}",
-                    f"{overlay.delta_y_um:+.3f}",
-                    f"{overlay.overlay_r_um:.3f}",
-                    {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result),
-                    overlay.warning,
-                ])
+            records = self.batch_run_records.get(mark_id, [])
+            if records:
+                for record in records:
+                    overlay = record.get("overlay")
+                    rows.append([
+                        mark_id,
+                        str(record.get("run_index", "")),
+                        f"{overlay.delta_x_um:+.3f}" if overlay else "-",
+                        f"{overlay.delta_y_um:+.3f}" if overlay else "-",
+                        f"{overlay.overlay_r_um:.3f}" if overlay else "-",
+                        {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result) if overlay else "失败",
+                        overlay.warning if overlay else record.get("error", ""),
+                    ])
+            else:
+                for idx, overlay in enumerate(overlays, start=1):
+                    rows.append([
+                        mark_id,
+                        str(idx),
+                        f"{overlay.delta_x_um:+.3f}",
+                        f"{overlay.delta_y_um:+.3f}",
+                        f"{overlay.overlay_r_um:.3f}",
+                        {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result),
+                        overlay.warning,
+                    ])
             if overlays:
                 dxs = np.asarray([o.delta_x_um for o in overlays], dtype=float)
                 dys = np.asarray([o.delta_y_um for o in overlays], dtype=float)
@@ -3348,97 +3416,7 @@ class MainWindow(QMainWindow):
         )
 
     def calculate_batch_overlays(self):
-        self._pull_config_from_ui()
-        original_mark = self._current_mark_id()
-        original_images = {mark_id: dict(self.mark_images[mark_id]) for mark_id in ("Mark1", "Mark2")}
-        self.batch_overlays = {"Mark1": [], "Mark2": []}
-        calculated_lines = []
-        skipped = []
-        is_dual = self._current_mode() == "Dual Image"
-        total_runs = 0
-        for mark_id in ("Mark1", "Mark2"):
-            upper_count = len(self.batch_images.get(mark_id, {}).get("upper", []))
-            lower_count = len(self.batch_images.get(mark_id, {}).get("lower", []))
-            total_runs += min(upper_count, lower_count) if is_dual else upper_count
-        self._begin_long_task("正在批量计算对位偏差", max(1, total_runs))
-
-        for mark_id in ("Mark1", "Mark2"):
-            if self.cancel_requested:
-                skipped.append("用户取消批量计算")
-                break
-            upper_list = self.batch_images.get(mark_id, {}).get("upper", [])
-            lower_list = self.batch_images.get(mark_id, {}).get("lower", [])
-            if not upper_list:
-                continue
-            run_count = len(upper_list)
-            if is_dual:
-                run_count = min(len(upper_list), len(lower_list))
-                if run_count == 0:
-                    skipped.append(f"{mark_id}：批量模式缺少下层图像")
-                    continue
-                if len(upper_list) != len(lower_list):
-                    skipped.append(f"{mark_id}：上层/下层数量不一致，仅计算前 {run_count} 次")
-            self.mark_combo.setCurrentText(mark_id)
-            for run_idx in range(run_count):
-                if self.cancel_requested:
-                    skipped.append(f"{mark_id}：用户取消，剩余次数未计算")
-                    break
-                self.progress_stage_label.setText(f"正在计算 {mark_id} 第 {run_idx + 1}/{run_count} 次")
-                QApplication.processEvents()
-                self.mark_images[mark_id]["upper"] = upper_list[run_idx]
-                if is_dual:
-                    self.mark_images[mark_id]["lower"] = lower_list[run_idx]
-                self._sync_current_mark_images()
-                try:
-                    if self._is_auto_workflow():
-                        saved_selection = dict(self.auto_selections.get(mark_id, {}))
-                        self.auto_detections_by_mark[mark_id] = {}
-                        self.auto_identify_marks(show_message=False)
-                        # Restore preferred reference/target labels when possible.
-                        if saved_selection:
-                            self.auto_selections[mark_id] = saved_selection
-                            self._refresh_auto_selection_combos()
-                        overlay = self.calculate_auto_overlay(show_message=False)
-                    else:
-                        self.detections.pop(mark_id, None)
-                        self.analyze_roi_regions(show_message=False)
-                        self._refresh_auto_selection_combos()
-                        overlay = self.calculate_auto_overlay(show_message=False)
-                    if overlay is not None:
-                        self.batch_overlays[mark_id].append(overlay)
-                    else:
-                        skipped.append(f"{mark_id} 第{run_idx + 1}次：未生成对位结果")
-                except Exception as exc:
-                    skipped.append(f"{mark_id} 第{run_idx + 1}次：{self._friendly_error(exc)}")
-                self._update_progress(f"{mark_id} 第 {run_idx + 1}/{run_count} 次完成")
-            mean_overlay = self._mean_overlay(mark_id, self.batch_overlays[mark_id])
-            if mean_overlay is not None:
-                if self._is_auto_workflow():
-                    self.auto_overlays[mark_id] = mean_overlay
-                else:
-                    self.overlays[mark_id] = mean_overlay
-                calculated_lines.append(
-                    f"{mark_id}: {len(self.batch_overlays[mark_id])}次，"
-                    f"Dx均值={mean_overlay.delta_x_um:+.3f} μm，"
-                    f"Dy均值={mean_overlay.delta_y_um:+.3f} μm，"
-                    f"Dxy均值={mean_overlay.overlay_r_um:.3f} μm"
-                )
-
-        self.mark_combo.setCurrentText(original_mark)
-        self.mark_images = original_images
-        self._sync_current_mark_images()
-        self._refresh_auto_selection_combos()
-        self._refresh_all_widgets()
-        if hasattr(self, "result_tabs"):
-            self.result_tabs.setCurrentIndex(2)
-        self._end_long_task("批量计算已取消" if self.cancel_requested else "批量计算结束")
-        if calculated_lines:
-            msg = "批量计算完成：\n" + "\n".join(calculated_lines)
-            if skipped:
-                msg += "\n\n提示：\n" + "\n".join(skipped)
-            QMessageBox.information(self, "批量计算完成", msg)
-        else:
-            QMessageBox.warning(self, "批量计算", "未生成任何批量对位结果。\n" + ("\n".join(skipped) if skipped else "请先批量导入图像，并确认 ROI 与轮廓选择。"))
+        return self._start_measurement_job()
 
     def import_upper_image(self):
         mark_id = self._current_mark_id()
@@ -3511,6 +3489,11 @@ class MainWindow(QMainWindow):
         self.auto_overlays.clear()
         self.batch_images = {"Mark1": {"upper": [], "lower": []}, "Mark2": {"upper": [], "lower": []}}
         self.batch_overlays = {"Mark1": [], "Mark2": []}
+        self.batch_run_records = {"Mark1": [], "Mark2": []}
+        self.roi_sources = self._empty_roi_sources()
+        self.loaded_recipe_path = ""
+        self.loaded_recipe_display_name = ""
+        self._recipe_roi_confirmation_signature = None
         self.upper_canvas.set_circle_pick_mode(False)
         self.lower_canvas.set_circle_pick_mode(False)
         self.three_point_circle_btn.blockSignals(True)
@@ -3521,7 +3504,7 @@ class MainWindow(QMainWindow):
         self._refresh_auto_selection_combos()
         self._refresh_all_widgets()
 
-    def set_roi(self, mark_id: str, layer: str, roi: Roi):
+    def set_roi(self, mark_id: str, layer: str, roi: Roi, source: str = "manual"):
         if hasattr(self, "three_point_circle_btn") and self.three_point_circle_btn.isChecked():
             self.three_point_circle_btn.blockSignals(True)
             self.three_point_circle_btn.setChecked(False)
@@ -3537,6 +3520,8 @@ class MainWindow(QMainWindow):
             mark.upper_roi = roi
         else:
             mark.lower_roi = roi
+        self.roi_sources.setdefault(mark_id, {})[layer] = source if roi is not None else "none"
+        self._recipe_roi_confirmation_signature = None
         # Clear outdated detection for that layer.
         if mark_id in self.detections and layer in self.detections[mark_id]:
             del self.detections[mark_id][layer]
@@ -3572,6 +3557,36 @@ class MainWindow(QMainWindow):
             self.roi_angle_spin.setValue(float(getattr(roi, "angle_deg", 0.0)))
             for widget in widgets:
                 widget.blockSignals(False)
+        self._refresh_all_widgets()
+
+    def clear_current_roi(self):
+        mark_id = self._current_mark_id()
+        layer = self._current_layer()
+        self.set_roi(mark_id, layer, None)
+        self._append_log(f"已清除 {mark_id} {LAYER_LABELS.get(layer, layer)} ROI。")
+
+    def clear_all_recipe_rois(self):
+        cleared = []
+        for mark_id in ("Mark1", "Mark2"):
+            mark = self.marks.get(mark_id)
+            if mark is None:
+                continue
+            for layer in ("upper", "lower"):
+                if self._roi_source(mark_id, layer) != "recipe":
+                    continue
+                if layer == "upper":
+                    mark.upper_roi = None
+                else:
+                    mark.lower_roi = None
+                self.roi_sources.setdefault(mark_id, {})[layer] = "none"
+                cleared.append(f"{mark_id}-{LAYER_LABELS.get(layer, layer)}")
+        self._recipe_roi_confirmation_signature = None
+        if cleared:
+            self.detections.clear()
+            self.overlays.clear()
+            self._append_log("已清除配方 ROI：" + "、".join(cleared))
+        else:
+            self._append_log("当前没有配方来源的 ROI。")
         self._refresh_all_widgets()
 
     def _image_for_layer(self, layer: str, mark_id: Optional[str] = None) -> Optional[ImageData]:
@@ -3659,84 +3674,174 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "分析 ROI 区域", "ROI 区域分析失败：\n" + "\n".join(errors))
         return len(analyzed)
 
-    def analyze_all_marks(self):
-        """Calculate overlay for every prepared Mark in one click.
-
-        The top blue button is the single production entry. It traverses Mark1 and
-        Mark2, supports both Auto and Manual workflows, refreshes ROI detection when
-        needed, and calculates every Mark that already has valid reference/target
-        contours. This avoids asking technicians to switch Mark one by one.
-        """
-        self._pull_config_from_ui()
-        if self._is_batch_mode():
-            return self.calculate_batch_overlays()
-        original_mark = self._current_mark_id()
-        calculated = []
-        skipped = []
-        self._begin_long_task("正在计算 Mark1/Mark2 对位偏差", 2)
-
+    def _recipe_roi_usage(self) -> list[str]:
+        if self._is_auto_workflow():
+            return []
+        usage = []
         for mark_id in ("Mark1", "Mark2"):
-            if self.cancel_requested:
-                skipped.append("用户取消计算")
-                break
-            if mark_id not in self.marks:
-                self._update_progress(f"{mark_id} 未配置，已跳过")
+            images = self.batch_images.get(mark_id, {}) if self._is_batch_mode() else self.mark_images.get(mark_id, {})
+            has_upper = bool(images.get("upper"))
+            if not has_upper:
                 continue
-            self.mark_combo.setCurrentText(mark_id)
-            self._sync_current_mark_images()
-            self._refresh_auto_selection_combos()
-            self.progress_stage_label.setText(f"正在计算 {mark_id}")
-            QApplication.processEvents()
+            for layer in ("upper", "lower"):
+                roi = getattr(self.marks.get(mark_id), f"{layer}_roi", None)
+                if roi is not None and self._roi_source(mark_id, layer) == "recipe":
+                    usage.append(f"{mark_id} {LAYER_LABELS.get(layer, layer)}")
+        return usage
 
-            try:
-                if self._is_auto_workflow():
-                    if not self._current_auto_detections():
-                        self.auto_identify_marks(show_message=False)
-                    self._refresh_auto_selection_combos()
-                    reference_label = self.auto_reference_combo.currentData() or ""
-                    target_label = self.auto_target_combo.currentData() or ""
-                    if not reference_label or not target_label or reference_label == target_label:
-                        skipped.append(f"{mark_id}：未选择有效的基准/待测轮廓")
-                        continue
-                    overlay = self.calculate_auto_overlay(show_message=False)
-                else:
-                    analyzed_count = self.analyze_roi_regions(show_message=False)
-                    self._refresh_auto_selection_combos()
-                    reference_label = self.auto_reference_combo.currentData() or ""
-                    target_label = self.auto_target_combo.currentData() or ""
-                    if not reference_label or not target_label or reference_label == target_label:
-                        skipped.append(f"{mark_id}：未选择有效的基准/待测轮廓")
-                        continue
-                    overlay = self.calculate_auto_overlay(show_message=False)
+    def _confirm_recipe_rois(self) -> bool:
+        usage = self._recipe_roi_usage()
+        if not usage:
+            return True
+        signature = tuple(usage)
+        if signature == self._recipe_roi_confirmation_signature:
+            return True
+        answer = QMessageBox.question(
+            self,
+            "确认配方 ROI",
+            "本次手动测量仍会使用以下配方 ROI：\n\n"
+            + "\n".join(f"• {item}" for item in usage)
+            + "\n\n继续使用这些 ROI 计算吗？\n如不需要，请取消后清除或重新框选对应 ROI。",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if answer == QMessageBox.Yes:
+            self._recipe_roi_confirmation_signature = signature
+            return True
+        return False
 
-                if overlay is not None:
-                    calculated.append(
-                        f"{mark_id}: Dx={overlay.delta_x_um:+.3f} μm, "
-                        f"Dy={overlay.delta_y_um:+.3f} μm, Dxy={overlay.overlay_r_um:.3f} μm"
-                    )
-                else:
-                    skipped.append(f"{mark_id}：未生成对位结果")
-            except Exception as exc:
-                skipped.append(f"{mark_id}：{self._friendly_error(exc)}")
-            self._update_progress(f"{mark_id} 处理完成")
+    def _calculation_job_snapshot(self) -> dict:
+        self._pull_config_from_ui()
+        return {
+            "config": deepcopy(self.config),
+            "params": deepcopy(self.params),
+            "marks": deepcopy(self.marks),
+            "mark_images": {mark_id: dict(self.mark_images[mark_id]) for mark_id in ("Mark1", "Mark2")},
+            "batch_images": {
+                mark_id: {layer: list(self.batch_images[mark_id][layer]) for layer in ("upper", "lower")}
+                for mark_id in ("Mark1", "Mark2")
+            },
+            "selections": deepcopy(self.auto_selections),
+            "batch": self._is_batch_mode(),
+            "roi_sources": deepcopy(self.roi_sources),
+        }
 
-        self.mark_combo.setCurrentText(original_mark)
-        self._sync_current_mark_images()
+    def _set_calculation_running(self, running: bool):
+        self._calculation_running = bool(running)
+        self.progress_bar.setVisible(running)
+        self.progress_stage_label.setVisible(running)
+        self.cancel_progress_btn.setVisible(running)
+        if running:
+            self.progress_bar.setValue(0)
+        for button in (
+            self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn,
+            self.save_recipe_btn, self.analyze_all_btn, self.export_btn,
+            self.analyze_roi_btn, self.auto_detect_btn, self.reset_measurement_btn,
+        ):
+            button.setEnabled(not running)
+        self.side_tabs.setEnabled(not running)
+
+    def _start_measurement_job(self):
+        if self._calculation_running:
+            return
+        self._pull_config_from_ui()
+        if not self._confirm_recipe_rois():
+            self._append_log("已取消计算；配方 ROI 未确认。")
+            return
+        job = self._calculation_job_snapshot()
+        self._set_calculation_running(True)
+        self.progress_stage_label.setText("正在准备后台计算")
+        self._append_log(
+            "计算路径：全图自动识别（不使用 ROI）"
+            if self._is_auto_workflow()
+            else "计算路径：手动 ROI；ROI 来源已锁定到本次任务快照"
+        )
+        thread = QThread(self)
+        worker = MeasurementWorker(job)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_calculation_progress)
+        worker.finished.connect(self._on_calculation_completed)
+        worker.failed.connect(self._on_calculation_failed)
+        worker.cancelled.connect(self._on_calculation_cancelled)
+        for signal in (worker.finished, worker.failed, worker.cancelled):
+            signal.connect(thread.quit)
+            signal.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_calculation_thread_finished)
+        self._calculation_thread = thread
+        self._calculation_worker = worker
+        thread.start()
+
+    def analyze_all_marks(self):
+        return self._start_measurement_job()
+
+    def cancel_calculation(self):
+        if self._calculation_worker is not None:
+            self._calculation_worker.cancel()
+            self.cancel_progress_btn.setEnabled(False)
+            self.progress_stage_label.setText("正在取消，当前算法步骤完成后停止")
+
+    @Slot(int, int, str)
+    def _on_calculation_progress(self, done: int, total: int, message: str):
+        self.progress_bar.setValue(int(round(100.0 * done / max(1, total))))
+        self.progress_stage_label.setText(message)
+        self.statusBar().showMessage(message)
+
+    @Slot(object)
+    def _on_calculation_completed(self, payload: dict):
+        self.detections = payload.get("detections", {})
+        self.overlays = payload.get("overlays", {})
+        self.auto_candidates_by_mark = payload.get("auto_candidates", {"Mark1": {}, "Mark2": {}})
+        self.auto_detections_by_mark = payload.get("auto_detections", {"Mark1": {}, "Mark2": {}})
+        self.auto_overlays = payload.get("auto_overlays", {})
+        self.auto_selections = payload.get("selections", self.auto_selections)
+        self.batch_overlays = payload.get("batch_overlays", {"Mark1": [], "Mark2": []})
+        self.batch_run_records = payload.get("batch_records", {"Mark1": [], "Mark2": []})
         self._refresh_auto_selection_combos()
         self._refresh_all_widgets()
-        self._end_long_task("计算已取消" if self.cancel_requested else "计算结束")
-
-        if calculated:
-            message = "已完成以下 Mark 的对位偏差计算：\n" + "\n".join(calculated)
-            if skipped:
-                message += "\n\n以下 Mark 未完成：\n" + "\n".join(skipped)
+        if payload.get("batch") and hasattr(self, "result_tabs"):
+            self.result_tabs.setCurrentIndex(2)
+        result_map = self.auto_overlays if self._is_auto_workflow() else self.overlays
+        lines = [
+            f"{mark_id}: Dx={item.delta_x_um:+.3f} μm，Dy={item.delta_y_um:+.3f} μm，Dxy={item.overlay_r_um:.3f} μm"
+            for mark_id, item in result_map.items()
+        ]
+        notes = list(payload.get("warnings", [])) + list(payload.get("skipped", []))
+        if lines:
+            message = "计算完成：\n" + "\n".join(lines)
+            if notes:
+                message += "\n\n提示：\n" + "\n".join(notes)
             QMessageBox.information(self, "计算完成", message)
         else:
-            QMessageBox.warning(
-                self,
-                "计算对位偏差",
-                "未生成任何对位结果。\n" + ("\n".join(skipped) if skipped else "请先导入图像、设置/识别 ROI，并选择基准轮廓和待测轮廓。"),
-            )
+            QMessageBox.warning(self, "计算对位偏差", "未生成任何对位结果。\n" + "\n".join(notes))
+
+    @Slot(str)
+    def _on_calculation_failed(self, message: str):
+        QMessageBox.critical(self, "计算失败", self._friendly_error(Exception(message)))
+
+    @Slot()
+    def _on_calculation_cancelled(self):
+        self._append_log("计算已取消。")
+
+    @Slot()
+    def _on_calculation_thread_finished(self):
+        self._calculation_worker = None
+        self._calculation_thread = None
+        self.cancel_progress_btn.setEnabled(True)
+        self._set_calculation_running(False)
+        self._refresh_all_widgets()
+
+    def closeEvent(self, event):
+        thread = self._calculation_thread
+        if thread is not None and thread.isRunning():
+            if self._calculation_worker is not None:
+                self._calculation_worker.cancel()
+            if not thread.wait(5000):
+                event.ignore()
+                self._append_log("后台计算仍在停止，请稍候后再次关闭。")
+                return
+        super().closeEvent(event)
 
     def _analyze_mark(self, mark_id: str, show_success: bool = True):
         self._pull_config_from_ui()
@@ -3830,6 +3935,8 @@ class MainWindow(QMainWindow):
             return
         try:
             save_recipe(path, self.config, self.params, list(self.marks.values()))
+            self.loaded_recipe_path = path
+            self.loaded_recipe_display_name = self.config.recipe_name.strip() or Path(path).stem
             QMessageBox.information(self, "保存完成", f"配方已保存：\n{path}")
         except Exception as exc:
             QMessageBox.critical(self, "保存失败", str(exc))
@@ -3849,6 +3956,15 @@ class MainWindow(QMainWindow):
                 mark_id: loaded_marks.get(mark_id, MarkRecipe(mark_id))
                 for mark_id in ("Mark1", "Mark2")
             }
+            self.roi_sources = self._empty_roi_sources()
+            for mark_id, mark in self.marks.items():
+                if mark.upper_roi is not None:
+                    self.roi_sources[mark_id]["upper"] = "recipe"
+                if mark.lower_roi is not None:
+                    self.roi_sources[mark_id]["lower"] = "recipe"
+            self.loaded_recipe_path = path
+            self.loaded_recipe_display_name = self.config.recipe_name.strip() or Path(path).stem
+            self._recipe_roi_confirmation_signature = None
             # 加载配方只更新产品信息、ROI、算法参数和判定规格，不重置已导入图像。
             # 这样用户可以先导入图像，再加载同类型物料的配方继续测量。
             for runtime_mark in ("Mark1", "Mark2"):
@@ -3862,6 +3978,8 @@ class MainWindow(QMainWindow):
                 "Mark2": {"reference_label": "", "target_label": ""},
             }
             self.auto_overlays.clear()
+            self.batch_overlays = {"Mark1": [], "Mark2": []}
+            self.batch_run_records = {"Mark1": [], "Mark2": []}
             self._sync_current_mark_images()
             self._push_config_to_ui()
             self._push_current_auto_match_rules()

@@ -1,5 +1,15 @@
 # Changelog
 
+## V1.5.4
+
+- Moved single and batch overlay calculations to a `QThread` worker with real stage progress and cooperative cancellation.
+- Added per-Mark/per-layer ROI source tracking (`recipe`, `manual`, or unset), source display, and explicit recipe-ROI confirmation before manual calculations.
+- Made full-image auto recognition explicitly ignore every stored ROI and clear stale automatic candidates when switching workflows.
+- Renamed the ROI fitting option to clarify that automatic model selection is not the full-image auto-recognition workflow.
+- Added controls to clear the current ROI or all remaining recipe ROIs.
+- Combined the web V1.5.3 display/export improvements with the main branch measurement service, non-square-pixel conversion, golden tests, and automatic-search truncation diagnostics.
+- Preserved native image intensity ranges when display enhancement is off and retained failed batch runs in repeatability exports.
+
 ## V1.5.3
 
 - Added Rx/Ry angle and material thickness compensation for overlay calculations.

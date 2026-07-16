@@ -14,6 +14,9 @@ class ImageData:
     path: str
     gray: object
     display_name: str
+    source_dtype: str = ""
+    source_min: float = 0.0
+    source_max: float = 0.0
 
 
 @dataclass

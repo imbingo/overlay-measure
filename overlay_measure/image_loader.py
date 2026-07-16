@@ -95,6 +95,10 @@ def load_image(path: str) -> ImageData:
                 raise ValueError(f"不支持的图像通道数：{arr.shape[2]}")
 
     arr = np.asarray(arr)
+    source_dtype = str(arr.dtype)
+    source_finite = arr[np.isfinite(arr)] if np.issubdtype(arr.dtype, np.number) else np.asarray([], dtype=float)
+    source_min = float(np.min(source_finite)) if source_finite.size else 0.0
+    source_max = float(np.max(source_finite)) if source_finite.size else 0.0
     if arr.ndim != 2:
         raise ValueError(f"图像/矩阵必须是二维数据，当前维度：{arr.shape}")
 
@@ -111,7 +115,47 @@ def load_image(path: str) -> ImageData:
             )
 
     gray = arr.astype(np.float32)
-    return ImageData(path=str(p), gray=gray, display_name=p.name)
+    return ImageData(
+        path=str(p),
+        gray=gray,
+        display_name=p.name,
+        source_dtype=source_dtype,
+        source_min=source_min,
+        source_max=source_max,
+    )
+
+
+def display_to_uint8(image: ImageData, enhanced: bool = False) -> np.ndarray:
+    """Convert image data for display without changing measurement pixels."""
+    gray = np.asarray(image.gray, dtype=np.float32)
+    if enhanced:
+        return normalize_to_uint8(gray)
+
+    finite = gray[np.isfinite(gray)]
+    if finite.size == 0:
+        return np.zeros_like(gray, dtype=np.uint8)
+
+    try:
+        dtype = np.dtype(image.source_dtype) if image.source_dtype else None
+    except TypeError:
+        dtype = None
+    if dtype is not None and np.issubdtype(dtype, np.bool_):
+        return (gray > 0).astype(np.uint8) * 255
+    if dtype is not None and np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        lo, hi = float(info.min), float(info.max)
+    else:
+        lo, hi = float(image.source_min), float(image.source_max)
+        if lo >= 0.0 and hi <= 1.0:
+            lo, hi = 0.0, 1.0
+        elif lo >= 0.0 and hi <= 255.0:
+            lo, hi = 0.0, 255.0
+        elif hi <= lo:
+            lo, hi = float(np.min(finite)), float(np.max(finite))
+    if hi <= lo:
+        return np.zeros_like(gray, dtype=np.uint8)
+    out = np.clip((gray - lo) / (hi - lo), 0.0, 1.0)
+    return np.rint(out * 255.0).astype(np.uint8)
 
 
 def normalize_to_uint8(gray: np.ndarray) -> np.ndarray:
