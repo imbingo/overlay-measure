@@ -32,6 +32,7 @@ DETAIL_COLUMNS = {
     "edge_point_count": "边缘点数",
     "confidence": "置信度",
     "fitting_mode": "拟合模式",
+    "algorithm_path": "算法路径",
     "measurement_stage": "测量阶段",
     "quality_status": "质量状态",
     "coverage": "覆盖率",
@@ -155,6 +156,7 @@ def build_detection_rows(
                 "edge_point_count": det.edge_point_count,
                 "confidence": det.confidence,
                 "fitting_mode": _fit_cn(det.fitting_mode),
+                "algorithm_path": det.shape_params.get("algorithm_path", ""),
                 "measurement_stage": "正式精测" if det.shape_params.get("measurement_stage") == "production_measurement" else "候选检测",
                 "quality_status": {"Valid": "有效", "Invalid": "无效"}.get(det.shape_params.get("quality_status"), det.shape_params.get("quality_status", "")),
                 "coverage": det.shape_params.get("coverage"),
@@ -222,19 +224,27 @@ def _style_sheet(ws, fail_columns: Optional[List[str]] = None):
     _autosize(ws)
 
 
+def resize_dimensions_preserving_aspect(width: float, height: float, max_width: float, max_height: float) -> tuple[int, int]:
+    scale = min(max_width / max(width, 1.0), max_height / max(height, 1.0), 1.0)
+    return int(round(width * scale)), int(round(height * scale))
+
+
 def export_results(
     path: str,
     rows: List[dict],
     config: Optional[MeasurementConfig] = None,
     summary_rows: Optional[List[dict]] = None,
     mark_images: Optional[List[dict]] = None,
+    repeatability_rows: Optional[List[dict]] = None,
 ) -> None:
     detail_df = pd.DataFrame(rows).rename(columns=DETAIL_COLUMNS)
     summary_df = pd.DataFrame(summary_rows or [])
+    repeatability_df = pd.DataFrame(repeatability_rows or [])
     # Keep exported measurement results concise for production review.
     # Internal calculation remains full precision; only output tables are rounded.
     detail_df = detail_df.round(3)
     summary_df = summary_df.round(3)
+    repeatability_df = repeatability_df.round(3)
     ext = Path(path).suffix.lower()
     if ext != ".xlsx":
         # CSV can contain only one table, so export the concise summary when available.
@@ -260,6 +270,10 @@ def export_results(
             {"项目": "自动待测 Mark", "内容": getattr(config, "auto_target_label", "")},
             {"项目": "像素尺寸X(μm/px)", "内容": config.pixel_size_x_um},
             {"项目": "像素尺寸Y(μm/px)", "内容": config.pixel_size_y_um},
+            {"项目": "Rx角度(μrad)", "内容": getattr(config, "rx_angle_urad", 0.0)},
+            {"项目": "Ry角度(μrad)", "内容": getattr(config, "ry_angle_urad", 0.0)},
+            {"项目": "物料厚度(mm)", "内容": getattr(config, "material_thickness_mm", 0.0)},
+            {"项目": "角度补偿公式", "内容": "ΔX=原始ΔX+厚度×Ry/1000；ΔY=原始ΔY-厚度×Rx/1000"},
             {"项目": "Rz分布方向", "内容": config.rz_layout},
             {"项目": "Rz单位", "内容": "μrad"},
             {"项目": "Mark间距L(μm)", "内容": config.rz_distance_l_um},
@@ -270,9 +284,15 @@ def export_results(
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
             info_df.to_excel(writer, index=False, sheet_name="基础信息")
             summary_df.to_excel(writer, index=False, sheet_name="结果汇总")
+            if not repeatability_df.empty:
+                repeatability_df.to_excel(writer, index=False, sheet_name="多次测量结果")
             detail_df.to_excel(writer, index=False, sheet_name="识别明细")
 
-            for sheet_name in ("基础信息", "结果汇总", "识别明细"):
+            sheet_names = ["基础信息", "结果汇总"]
+            if not repeatability_df.empty:
+                sheet_names.append("多次测量结果")
+            sheet_names.append("识别明细")
+            for sheet_name in sheet_names:
                 ws = writer.book[sheet_name]
                 _style_sheet(ws, fail_columns=["结果", "判定", "提示"])
 
@@ -290,8 +310,7 @@ def export_results(
                     image_path = item.get("path")
                     if image_path and Path(image_path).exists():
                         img = XlsxImage(str(image_path))
-                        img.width = min(img.width, 260)
-                        img.height = min(img.height, 180)
+                        img.width, img.height = resize_dimensions_preserving_aspect(img.width, img.height, 260.0, 180.0)
                         ws.add_image(img, f"C{idx}")
-                        ws.row_dimensions[idx].height = 140
+                        ws.row_dimensions[idx].height = max(60, img.height * 0.75 + 10)
                 ws.column_dimensions["C"].width = 38

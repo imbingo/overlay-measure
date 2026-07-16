@@ -6,6 +6,22 @@ from typing import Dict, Optional
 from .models import DetectionResult, MeasurementConfig, OverlayResult
 
 
+def _angle_compensation_um(config: MeasurementConfig) -> tuple[float, float]:
+    """Return equipment-coordinate compensation from material tilt.
+
+    thickness(mm) * angle(urad) / 1000 = displacement(um).
+    Rx tilts compensate Y with the opposite sign; Ry tilts compensate X.
+    """
+    thickness_mm = float(getattr(config, "material_thickness_mm", 0.0) or 0.0)
+    rx_urad = float(getattr(config, "rx_angle_urad", 0.0) or 0.0)
+    ry_urad = float(getattr(config, "ry_angle_urad", 0.0) or 0.0)
+    return thickness_mm * ry_urad / 1000.0, -thickness_mm * rx_urad / 1000.0
+
+
+def _um_to_px(value_um: float, pixel_size_um: float) -> float:
+    return value_um / pixel_size_um if pixel_size_um else 0.0
+
+
 def calculate_overlay(mark_id: str, upper: DetectionResult, lower: DetectionResult, config: MeasurementConfig) -> OverlayResult:
     off_x_px = config.registration_offset_x_um / config.pixel_size_x_um if config.pixel_size_x_um else 0.0
     off_y_px = config.registration_offset_y_um / config.pixel_size_y_um if config.pixel_size_y_um else 0.0
@@ -19,8 +35,11 @@ def calculate_overlay(mark_id: str, upper: DetectionResult, lower: DetectionResu
     delta_x_px = upper.center_x_px - lower_x_corr_px
     delta_y_image_px = upper.center_y_px - lower_y_corr_px
     delta_y_px = -delta_y_image_px
-    delta_x_um = delta_x_px * config.pixel_size_x_um
-    delta_y_um = delta_y_px * config.pixel_size_y_um
+    comp_x_um, comp_y_um = _angle_compensation_um(config)
+    delta_x_um = delta_x_px * config.pixel_size_x_um + comp_x_um
+    delta_y_um = delta_y_px * config.pixel_size_y_um + comp_y_um
+    delta_x_px += _um_to_px(comp_x_um, config.pixel_size_x_um)
+    delta_y_px += _um_to_px(comp_y_um, config.pixel_size_y_um)
     r_um = math.sqrt(delta_x_um * delta_x_um + delta_y_um * delta_y_um)
 
     warnings = []
@@ -71,8 +90,11 @@ def calculate_relative_overlay(
     delta_x_px = target_x - reference_x
     delta_y_image_px = target_y - reference_y
     delta_y_px = -delta_y_image_px
-    delta_x_um = delta_x_px * config.pixel_size_x_um
-    delta_y_um = delta_y_px * config.pixel_size_y_um
+    comp_x_um, comp_y_um = _angle_compensation_um(config)
+    delta_x_um = delta_x_px * config.pixel_size_x_um + comp_x_um
+    delta_y_um = delta_y_px * config.pixel_size_y_um + comp_y_um
+    delta_x_px += _um_to_px(comp_x_um, config.pixel_size_x_um)
+    delta_y_px += _um_to_px(comp_y_um, config.pixel_size_y_um)
     distance_um = math.hypot(delta_x_um, delta_y_um)
     warnings = []
     if abs(delta_x_um) > config.delta_x_limit_um:

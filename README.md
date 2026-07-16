@@ -4,13 +4,13 @@
 
 ## 当前版本
 
-- 当前代码版本：V1.5
+- 当前代码版本：V1.5.3
 - 来源文件：`overlay_mark_measure_v1_4_2.zip`
 - Windows 启动文件：`start_overlay_measure.bat`
 - Python 主入口：`main.py`
 - 主界面代码：`overlay_measure/ui_main.py`
 
-V1.5 增加了可测试的测量服务层、黄金样例测试、算法路径显示、自动识别截断提示，并改进非等比例像素下的物理单位换算。
+V1.5.3 增加了角度/厚度补偿、批量导出明细和 PV 统计、显示增强开关、统一结果 Tab、算法路径追溯和计算进度反馈。
 
 ## 运行
 

@@ -192,6 +192,9 @@ class MeasurementConfig:
     pixel_size_y_um: float = 0.1
     registration_offset_x_um: float = 0.0
     registration_offset_y_um: float = 0.0
+    rx_angle_urad: float = 0.0
+    ry_angle_urad: float = 0.0
+    material_thickness_mm: float = 0.0
     overlay_definition: str = "upper_minus_lower"
     delta_x_limit_um: float = 0.5
     delta_y_limit_um: float = 0.5

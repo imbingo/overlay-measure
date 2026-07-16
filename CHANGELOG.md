@@ -1,5 +1,18 @@
 # Changelog
 
+## V1.5.3
+
+- Added Rx/Ry angle and material thickness compensation for overlay calculations.
+- Added repeatability export rows with per-run results, mean, 3 sigma, and PV statistics.
+- Added default export filenames based on the input image name plus `Misalignment_Result` and timestamp.
+- Preserved Mark image aspect ratio in Excel exports.
+- Added a UI display-enhancement switch, defaulting to raw grayscale display.
+- Consolidated detection details, overlay results, and repeatability analysis into one result tab area.
+- Added progress feedback and cancel support for Mark/batch overlay calculations.
+- Restored algorithm-path traceability in the detection detail table and kept the status-bar popup.
+- Removed duplicated top recipe/workflow hints and fixed recipe-name fallback after loading JSON.
+- Changed final fit outlines and labels to high-contrast green instead of white.
+
 ## V1.5
 
 - Added a service layer for manual ROI detection and Rz summary calculation, reducing UI coupling.

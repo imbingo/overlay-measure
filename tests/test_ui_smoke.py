@@ -15,8 +15,11 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     window.show()
     app.processEvents()
 
-    assert "V1.5" in window.windowTitle()
+    assert "V1.5.3" in window.windowTitle()
     assert window.algorithm_path_button.text() == "算法路径"
+    assert not window.display_enhance_check.isChecked()
+    assert window.result_tabs.count() == 3
+    assert [window.result_tabs.tabText(i) for i in range(window.result_tabs.count())] == ["识别明细", "对位结果", "重复性分析"]
     assert "暂无测量结果" in window.algorithm_path_text
     assert "暂无测量结果" in window.algorithm_path_button.toolTip()
     assert not hasattr(window, "algorithm_path_label")

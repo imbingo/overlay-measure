@@ -127,3 +127,27 @@ def normalize_to_uint8(gray: np.ndarray) -> np.ndarray:
     out = (gray - lo) / (hi - lo)
     out = np.clip(out, 0, 1)
     return (out * 255).astype(np.uint8)
+
+
+def raw_to_uint8(gray: np.ndarray) -> np.ndarray:
+    """Convert to 8-bit for display without percentile contrast stretching."""
+    gray = np.asarray(gray, dtype=np.float32)
+    finite = gray[np.isfinite(gray)]
+    if finite.size == 0:
+        return np.zeros_like(gray, dtype=np.uint8)
+    cleaned = np.nan_to_num(
+        gray,
+        nan=float(np.nanmedian(finite)),
+        posinf=float(np.nanmax(finite)),
+        neginf=float(np.nanmin(finite)),
+    )
+    min_value = float(np.min(finite))
+    max_value = float(np.max(finite))
+    if min_value >= 0.0 and max_value <= 255.0:
+        return np.clip(cleaned, 0, 255).astype(np.uint8)
+    if min_value >= 0.0 and max_value <= 65535.0:
+        return np.clip(cleaned / 257.0, 0, 255).astype(np.uint8)
+    if max_value <= min_value:
+        return np.zeros_like(gray, dtype=np.uint8)
+    out = (cleaned - min_value) / (max_value - min_value)
+    return np.clip(out * 255.0, 0, 255).astype(np.uint8)
