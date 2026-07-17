@@ -1,5 +1,17 @@
 # Changelog
 
+## V1.5.5
+
+- Reworked the desktop layout into a frameless, light industrial workspace based on the selected fused UI direction.
+- Removed the redundant left workflow rail while keeping the numbered 1–5 configuration tabs on the right.
+- Added a stable four-column result strip with responsive typography for compact window sizes.
+- Consolidated task state, current recipe, live progress, current calculation stage, algorithm path, and cancellation in the bottom status bar.
+- Fixed three-point circle creation so right/middle-button panning takes priority after two points without clearing the selected points.
+- Ensured top-level single-image imports replace stale batch previews and switch the run back to single-measurement mode.
+- Added a full measurement reset that clears imported images, batch lists, results, detections, automatic candidates, and every ROI while preserving reusable parameters.
+- Added append-style batch import from multiple folders, direct folder import, optional recursive subfolder scanning, natural ordering, and duplicate-file skipping.
+- Removed the redundant expected-repeat-count input; repeat counts now come directly from imported image lists.
+
 ## V1.5.4
 
 - Moved single and batch overlay calculations to a `QThread` worker with real stage progress and cooperative cancellation.

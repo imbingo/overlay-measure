@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import re
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
@@ -30,6 +31,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QStyle,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -42,7 +44,7 @@ from PySide6.QtWidgets import (
 
 from .auto_mark_detector import detect_auto_marks_with_report
 from .export_naming import build_export_filename
-from .image_loader import display_to_uint8, load_image
+from .image_loader import SUPPORTED_EXTENSIONS, display_to_uint8, load_image
 from .measurement_engine import run_measurement_job
 from .measurement_service import attach_algorithm_path, describe_algorithm_path, detect_manual_roi
 from .measurement_units import axis_scale_um_per_px, rotated_rect_size_um
@@ -71,6 +73,46 @@ class SidebarDoubleSpinBox(QDoubleSpinBox):
 class SidebarSpinBox(QSpinBox):
     def wheelEvent(self, event):
         event.ignore()
+
+
+class FramelessTitleBar(QFrame):
+    """Custom title bar that keeps the frameless window movable and maximizable."""
+
+    def __init__(self, window: QMainWindow):
+        super().__init__(window)
+        self.window = window
+        self.drag_offset: Optional[QPoint] = None
+        self.setObjectName("titleBar")
+        self.setFixedHeight(66)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            handle = self.window.windowHandle()
+            if handle is not None and handle.startSystemMove():
+                event.accept()
+                return
+            self.drag_offset = event.globalPosition().toPoint() - self.window.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.drag_offset is not None and event.buttons() & Qt.LeftButton and not self.window.isMaximized():
+            self.window.move(event.globalPosition().toPoint() - self.drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.drag_offset = None
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.window.toggle_maximized()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 
@@ -163,7 +205,7 @@ class ImageCanvas(QLabel):
         self.pan_start_x = 0.0
         self.pan_start_y = 0.0
         self.setText("等待导入图像")
-        self.setStyleSheet("QLabel { background: #2B2F36; color: #F5F6F8; border: 1px solid #3A404A; border-radius: 12px; }")
+        self.setStyleSheet("QLabel { background: #252930; color: #F5F6F8; border: 1px solid #363C45; border-radius: 6px; }")
 
     def set_image(self, image: Optional[ImageData]):
         self.image = image
@@ -631,7 +673,7 @@ class ImageCanvas(QLabel):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#2B2F36"))
+        painter.fillRect(self.rect(), QColor("#252930"))
 
         if self.pixmap_cache is None:
             painter.setPen(QColor("#F5F6F8"))
@@ -645,9 +687,20 @@ class ImageCanvas(QLabel):
 
         self._draw_overlays(painter)
 
-        painter.setPen(QColor("#F5F6F8"))
-        painter.drawText(10, 20, f"缩放: {self.user_zoom:.2f}x")
-        painter.drawText(10, 40, "滚轮缩放；右键/中键拖动画面；双击复位；左键拖 ROI，拖内/外环调范围")
+        header_rect = QRectF(8, 8, min(270, self.width() - 16), 48)
+        painter.fillRect(header_rect, QColor(18, 21, 26, 185))
+        painter.setPen(QColor("#FFFFFF"))
+        painter.setFont(QFont("Microsoft YaHei UI", 9, QFont.DemiBold))
+        painter.drawText(16, 27, self.title)
+        painter.setFont(QFont("Microsoft YaHei UI", 8))
+        painter.setPen(QColor("#D7DCE3"))
+        painter.drawText(16, 46, f"缩放 {self.user_zoom:.2f}x  ·  滚轮缩放 / 右键或中键平移")
+        if self.circle_pick_mode:
+            hint = f"三点定圆：已选 {len(self.circle_pick_points)}/3 点；可随时右键或中键平移"
+            hint_rect = QRectF(12, self.height() - 76, min(360, self.width() - 24), 28)
+            painter.fillRect(hint_rect, QColor(18, 21, 26, 205))
+            painter.setPen(QColor("#7EE787"))
+            painter.drawText(hint_rect.adjusted(8, 0, -8, 0), Qt.AlignVCenter | Qt.AlignLeft, hint)
         self._draw_scale_and_axes(painter)
         painter.end()
 
@@ -962,7 +1015,7 @@ class ImageCanvas(QLabel):
         if self.image is None:
             return
         if event.button() == Qt.RightButton:
-            if not self.show_auto_detections and self._point_in_active_roi_outer(event.position().toPoint()):
+            if not self.circle_pick_mode and not self.show_auto_detections and self._point_in_active_roi_outer(event.position().toPoint()):
                 menu = QMenu(self)
                 delete_action = menu.addAction("删除当前 ROI")
                 action = menu.exec(event.globalPosition().toPoint())
@@ -1028,18 +1081,18 @@ class ImageCanvas(QLabel):
                 self.update()
 
     def mouseMoveEvent(self, event):
-        if self.circle_pick_mode and len(self.circle_pick_points) == 2:
-            p = self.widget_to_image_float(event.position().toPoint())
-            if p is not None:
-                self.circle_preview_point = p
-                self.update()
-            event.accept()
-            return
         if self.is_panning and self.pan_start_pos is not None:
             pos = event.position().toPoint()
             self.pan_x = self.pan_start_x + (pos.x() - self.pan_start_pos.x())
             self.pan_y = self.pan_start_y + (pos.y() - self.pan_start_pos.y())
             self.update()
+            event.accept()
+            return
+        if self.circle_pick_mode and len(self.circle_pick_points) == 2:
+            p = self.widget_to_image_float(event.position().toPoint())
+            if p is not None:
+                self.circle_preview_point = p
+                self.update()
             event.accept()
             return
         if self.is_dragging and self.image is not None:
@@ -1096,7 +1149,7 @@ class ImageCanvas(QLabel):
         if event.button() in (Qt.RightButton, Qt.MiddleButton) and self.is_panning:
             self.is_panning = False
             self.pan_start_pos = None
-            self.setCursor(Qt.ArrowCursor)
+            self.setCursor(Qt.CrossCursor if self.circle_pick_mode else Qt.ArrowCursor)
             event.accept()
             return
         if event.button() == Qt.LeftButton and self.is_moving_roi:
@@ -1251,7 +1304,9 @@ class MainWindow(QMainWindow):
             if font_path.exists() and QFontDatabase.addApplicationFont(str(font_path)) >= 0:
                 break
         self.setFont(QFont("Microsoft YaHei UI", 9))
-        self.setWindowTitle("对位偏差测量软件 V1.5.4")
+        self.setWindowTitle("对位偏差测量软件 V1.5.5")
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+        self.setMinimumSize(1120, 720)
         self.resize(1500, 920)
 
         self.config = MeasurementConfig()
@@ -1263,6 +1318,7 @@ class MainWindow(QMainWindow):
             "Mark1": {"upper": None, "lower": None},
             "Mark2": {"upper": None, "lower": None},
         }
+        self.mark_image_sources = self._empty_image_sources()
         self.detections: Dict[str, Dict[str, DetectionResult]] = {}
         self.overlays = {}
         self.auto_detections_by_mark: Dict[str, Dict[str, Dict[str, DetectionResult]]] = {
@@ -1292,6 +1348,7 @@ class MainWindow(QMainWindow):
         self._calculation_thread: Optional[QThread] = None
         self._calculation_worker: Optional[MeasurementWorker] = None
         self._calculation_running = False
+        self.step_rows = []
 
         self._apply_window_style()
         self._build_ui()
@@ -1300,6 +1357,13 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _empty_roi_sources() -> dict:
+        return {
+            "Mark1": {"upper": "none", "lower": "none"},
+            "Mark2": {"upper": "none", "lower": "none"},
+        }
+
+    @staticmethod
+    def _empty_image_sources() -> dict:
         return {
             "Mark1": {"upper": "none", "lower": "none"},
             "Mark2": {"upper": "none", "lower": "none"},
@@ -1317,69 +1381,104 @@ class MainWindow(QMainWindow):
 
     def _apply_window_style(self):
         self.setStyleSheet("""
-            QMainWindow, QWidget { background: #F5F6F8; color: #1D1D1F; }
-            QLabel#titleLabel { font-size: 22px; font-weight: 700; color: #1D1D1F; }
+            QMainWindow, QWidget { background: #F4F6F8; color: #1D1D1F; }
+            QMainWindow { border: 1px solid #C9CED6; }
+            QLabel { background: transparent; }
+            QFrame#titleBar { background: #FFFFFF; border: none; border-bottom: 1px solid #DADDE3; }
+            QLabel#titleLabel { font-size: 21px; font-weight: 700; color: #1D1D1F; }
             QLabel#versionLabel, QLabel#recipeLabel, QLabel#statusCaption, QLabel#stepNote { color: #6E6E73; }
             QLabel#imageCardTitleUpper { color: #007AFF; font-size: 15px; font-weight: 700; }
             QLabel#imageCardTitleLower { color: #FF9500; font-size: 15px; font-weight: 700; }
             QLabel#resultTitle { font-size: 12px; color: #6E6E73; }
-            QLabel#resultValue { font-size: 24px; font-weight: 700; color: #1D1D1F; }
+            QLabel#resultValue { font-size: 26px; font-weight: 700; color: #1D1D1F; }
             QLabel#resultUnit { font-size: 12px; color: #6E6E73; }
-            QFrame#toolbarCard, QFrame#stepCard, QFrame#resultCard, QFrame#summaryCard, QFrame#imageCard { background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 14px; }
-            QGroupBox, QTableWidget, QPlainTextEdit { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 10px; margin-top: 8px; padding-top: 8px; }
+            QFrame#toolbarCard, QFrame#summaryCard, QFrame#imageCard, QFrame#tableCard { background: #FFFFFF; border: 1px solid #E0E4E9; border-radius: 7px; }
+            QWidget#metricCell { background: transparent; border: none; }
+            QGroupBox, QTableWidget, QPlainTextEdit { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 7px; margin-top: 8px; padding-top: 8px; }
             QPlainTextEdit { padding: 8px; color: #1D1D1F; font-family: "Microsoft YaHei UI"; font-size: 12px; }
             QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #1D1D1F; font-weight: 600; }
-            QPushButton { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 9px; padding: 7px 12px; min-height: 20px; }
+            QPushButton { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 7px; padding: 7px 12px; min-height: 20px; }
             QPushButton:hover { background: #FAFAFB; border-color: #BFC5CF; }
             QPushButton#primaryButton { background: #007AFF; color: #FFFFFF; border-color: #007AFF; font-weight: 600; }
+            QPushButton#windowButton { border: none; border-radius: 0; min-width: 36px; padding: 4px; background: transparent; font-size: 15px; }
+            QPushButton#windowButton:hover { background: #EEF1F4; }
+            QPushButton#closeButton { border: none; border-radius: 0; min-width: 38px; padding: 4px; background: transparent; font-size: 17px; }
+            QPushButton#closeButton:hover { background: #E81123; color: #FFFFFF; }
             QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 8px; padding: 5px 7px; min-height: 18px; }
-            QTabWidget::pane { border: 1px solid #E5E7EB; border-radius: 12px; background: #FFFFFF; }
-            QTabBar::tab { background: #F5F6F8; border: 1px solid #E5E7EB; padding: 8px 12px; margin-right: 2px; border-top-left-radius: 8px; border-top-right-radius: 8px; }
+            QTabWidget::pane { border: 1px solid #E0E4E9; border-radius: 7px; background: #FFFFFF; }
+            QTabBar::tab { background: #F4F6F8; border: 1px solid #E0E4E9; padding: 8px 11px; margin-right: 1px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
             QTabBar::tab:selected { background: #FFFFFF; color: #007AFF; font-weight: 600; }
-            QToolButton#sectionToggle { text-align: left; font-weight: 600; padding: 10px 12px; background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 10px; }
+            QTabWidget#sideTabs QTabBar::tab { padding: 8px 6px; font-size: 11px; }
+            QToolButton#sectionToggle { text-align: left; font-weight: 600; padding: 9px 10px; background: #FFFFFF; border: 1px solid #E0E4E9; border-radius: 7px; }
+            QScrollArea { border: none; background: #FFFFFF; }
+            QStatusBar { background: #FFFFFF; border-top: 1px solid #DADDE3; color: #4B5563; }
+            QStatusBar::item { border: none; }
+            QProgressBar { border: 1px solid #CBD1D9; border-radius: 5px; background: #EEF1F4; text-align: center; }
+            QProgressBar::chunk { background: #007AFF; border-radius: 4px; }
         """)
 
     def _build_ui(self):
         central = QWidget()
         root = QVBoxLayout(central)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(14)
+        root.setContentsMargins(8, 0, 8, 8)
+        root.setSpacing(8)
         self.setCentralWidget(central)
 
-        toolbar_card = QFrame()
-        toolbar_card.setObjectName("toolbarCard")
+        toolbar_card = FramelessTitleBar(self)
+        self.title_bar = toolbar_card
         toolbar = QHBoxLayout(toolbar_card)
-        toolbar.setContentsMargins(16, 12, 16, 12)
-        toolbar.setSpacing(10)
-        title_col = QVBoxLayout()
-        title_col.setSpacing(2)
+        toolbar.setContentsMargins(12, 8, 6, 8)
+        toolbar.setSpacing(8)
         title_row = QHBoxLayout()
-        title_row.setSpacing(10)
+        title_row.setSpacing(8)
         self.title_label = QLabel("对位偏差测量软件")
         self.title_label.setObjectName("titleLabel")
-        self.version_label = QLabel("V1.5.4")
+        self.title_label.setMinimumWidth(185)
+        self.version_label = QLabel("V1.5.5")
         self.version_label.setObjectName("versionLabel")
         title_row.addWidget(self.title_label)
         title_row.addWidget(self.version_label)
         title_row.addStretch(1)
-        title_col.addLayout(title_row)
 
-        self.import_upper_btn = QPushButton("📂 导入上层/单图")
-        self.import_lower_btn = QPushButton("📁 导入下层图像")
-        self.load_recipe_btn = QPushButton("🧾 加载配方")
-        self.save_recipe_btn = QPushButton("💾 保存配方")
-        self.analyze_all_btn = QPushButton("▶ 计算对位偏差")
-        self.export_btn = QPushButton("📤 导出结果")
+        self.import_upper_btn = QPushButton("导入上层/单图")
+        self.import_lower_btn = QPushButton("导入下层图像")
+        self.load_recipe_btn = QPushButton("加载配方")
+        self.save_recipe_btn = QPushButton("保存配方")
+        self.analyze_all_btn = QPushButton("计算对位偏差")
+        self.export_btn = QPushButton("导出结果")
+        self.import_upper_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        self.import_lower_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        self.load_recipe_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        self.save_recipe_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
+        self.analyze_all_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.export_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
         self.analyze_all_btn.setObjectName("primaryButton")
-        toolbar.addLayout(title_col, stretch=1)
+        toolbar.addLayout(title_row, stretch=1)
         for btn in (self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn, self.save_recipe_btn, self.analyze_all_btn, self.export_btn):
             toolbar.addWidget(btn)
+        toolbar.addSpacing(4)
+        self.minimize_btn = QPushButton("—")
+        self.maximize_btn = QPushButton("□")
+        self.close_btn = QPushButton("×")
+        for button in (self.minimize_btn, self.maximize_btn):
+            button.setObjectName("windowButton")
+            button.setFixedSize(38, 36)
+        self.close_btn.setObjectName("closeButton")
+        self.close_btn.setFixedSize(42, 36)
+        self.minimize_btn.setToolTip("最小化")
+        self.maximize_btn.setToolTip("最大化")
+        self.close_btn.setToolTip("关闭")
+        self.minimize_btn.clicked.connect(self.showMinimized)
+        self.maximize_btn.clicked.connect(self.toggle_maximized)
+        self.close_btn.clicked.connect(self.close)
+        toolbar.addWidget(self.minimize_btn)
+        toolbar.addWidget(self.maximize_btn)
+        toolbar.addWidget(self.close_btn)
         root.addWidget(toolbar_card)
 
         main_splitter = QSplitter(Qt.Horizontal)
         main_splitter.setChildrenCollapsible(False)
         root.addWidget(main_splitter, stretch=3)
-        main_splitter.addWidget(self._build_step_panel())
 
         center = QWidget()
         center_layout = QVBoxLayout(center)
@@ -1393,9 +1492,10 @@ class MainWindow(QMainWindow):
         image_toolbar_layout.setSpacing(8)
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["单图模式", "双图模式"])
+        self.mode_combo.setMinimumWidth(88)
         self.display_enhance_check = QCheckBox("显示增强")
         self.display_enhance_check.setChecked(False)
-        self.reset_measurement_btn = QPushButton("重置")
+        self.reset_measurement_btn = QPushButton("重置测量")
         self.zoom_in_btn = QPushButton("放大")
         self.zoom_out_btn = QPushButton("缩小")
         self.reset_view_btn = QPushButton("复位")
@@ -1465,6 +1565,7 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(center)
 
         self.side_tabs = QTabWidget()
+        self.side_tabs.setObjectName("sideTabs")
         for page, title in (
             (self._build_product_tab(), "① 产品信息"),
             (self._build_image_tab(), "② 图像导入"),
@@ -1477,11 +1578,31 @@ class MainWindow(QMainWindow):
             scroll.setWidget(page)
             self.side_tabs.addTab(scroll, title)
         main_splitter.addWidget(self.side_tabs)
-        main_splitter.setSizes([170, 1080, 350])
+        self.side_tabs.setMinimumWidth(330)
+        self.side_tabs.setMaximumWidth(440)
+        main_splitter.setSizes([1110, 360])
+        self.main_splitter = main_splitter
         self._install_progress_status_widgets()
         self._install_algorithm_path_status_button()
 
     def _install_progress_status_widgets(self):
+        self.statusBar().setSizeGripEnabled(True)
+        self.status_task_dot = QLabel("●")
+        self.status_task_dot.setStyleSheet("color: #A1A1A6;")
+        self.status_task_label = QLabel("等待导入图像")
+        task_widget = QWidget()
+        task_layout = QHBoxLayout(task_widget)
+        task_layout.setContentsMargins(4, 0, 8, 0)
+        task_layout.setSpacing(6)
+        task_layout.addWidget(self.status_task_dot)
+        task_layout.addWidget(self.status_task_label)
+        self.statusBar().addWidget(task_widget, 1)
+
+        self.current_recipe_label = QLabel("当前配方：未加载")
+        self.current_recipe_label.setObjectName("recipeLabel")
+        self.current_recipe_label.setMaximumWidth(260)
+        self.statusBar().addPermanentWidget(self.current_recipe_label)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -1495,16 +1616,21 @@ class MainWindow(QMainWindow):
         self.cancel_progress_btn.clicked.connect(self.cancel_calculation)
         self.statusBar().addPermanentWidget(self.progress_stage_label)
         self.statusBar().addPermanentWidget(self.progress_bar)
-        self.statusBar().addPermanentWidget(self.cancel_progress_btn)
 
     def _install_algorithm_path_status_button(self):
         self.algorithm_path_text = "暂无测量结果；分析 ROI 或自动识别后可查看实际算法路径。"
+        self.algorithm_path_summary_label = QLabel("算法路径：暂无测量结果")
+        self.algorithm_path_summary_label.setObjectName("statusCaption")
+        self.algorithm_path_summary_label.setMinimumWidth(140)
+        self.algorithm_path_summary_label.setMaximumWidth(280)
         self.algorithm_path_button = QToolButton()
-        self.algorithm_path_button.setText("算法路径")
+        self.algorithm_path_button.setText("查看")
         self.algorithm_path_button.setAutoRaise(True)
         self.algorithm_path_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.algorithm_path_button.setToolTip(self.algorithm_path_text)
+        self.statusBar().addPermanentWidget(self.algorithm_path_summary_label)
         self.statusBar().addPermanentWidget(self.algorithm_path_button)
+        self.statusBar().addPermanentWidget(self.cancel_progress_btn)
 
     def _build_image_card(self, title: str, layer: str, canvas: ImageCanvas) -> QWidget:
         # V1.2：去掉图像区顶部的大标题条，减少占用空间，保留画布本身。
@@ -1570,17 +1696,19 @@ class MainWindow(QMainWindow):
         return card
 
     def _result_metric_card(self, title: str):
-        card = QFrame()
-        card.setObjectName("resultCard")
+        card = QWidget()
+        card.setObjectName("metricCell")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(2)
+        layout.setContentsMargins(14, 7, 14, 7)
+        layout.setSpacing(1)
         title_label = QLabel(title)
         title_label.setObjectName("resultTitle")
         value_label = QLabel("--")
         value_label.setObjectName("resultValue")
+        value_label.setMinimumWidth(0)
         unit_label = QLabel("")
         unit_label.setObjectName("resultUnit")
+        unit_label.setMinimumWidth(0)
         layout.addWidget(title_label)
         layout.addWidget(value_label)
         layout.addWidget(unit_label)
@@ -1590,20 +1718,24 @@ class MainWindow(QMainWindow):
         card = QFrame()
         card.setObjectName("summaryCard")
         # V1.3.1：压缩顶部结果卡片高度，把更多垂直空间让给“对位结果/重复性分析”。
-        card.setMaximumHeight(108)
-        card.setMinimumHeight(86)
-        layout = QGridLayout(card)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setHorizontalSpacing(12)
-        layout.setVerticalSpacing(8)
+        card.setMaximumHeight(104)
+        card.setMinimumHeight(88)
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(0)
         self.dx_card, self.dx_value_label, self.dx_unit_label = self._result_metric_card("ΔX")
         self.dy_card, self.dy_value_label, self.dy_unit_label = self._result_metric_card("ΔY")
         self.r_card, self.r_value_label, self.r_unit_label = self._result_metric_card("综合偏差 R")
         self.result_card, self.result_value_label, self.result_unit_label = self._result_metric_card("判定结果")
-        layout.addWidget(self.dx_card, 0, 0)
-        layout.addWidget(self.dy_card, 0, 1)
-        layout.addWidget(self.r_card, 0, 2)
-        layout.addWidget(self.result_card, 0, 3)
+        for index, metric in enumerate((self.dx_card, self.dy_card, self.r_card, self.result_card)):
+            if index:
+                separator = QFrame()
+                separator.setFrameShape(QFrame.VLine)
+                separator.setStyleSheet("color: #E0E4E9;")
+                layout.addWidget(separator)
+            layout.addWidget(metric, stretch=1)
+
+        self.summary_panel = card
 
         return card
 
@@ -1665,20 +1797,26 @@ class MainWindow(QMainWindow):
         self.measurement_run_mode_combo = SidebarComboBox()
         self.measurement_run_mode_combo.addItem("单次测量", "Single")
         self.measurement_run_mode_combo.addItem("批量测量", "Batch")
-        self.batch_count_spin = SidebarSpinBox()
-        self.batch_count_spin.setRange(1, 99)
-        self.batch_count_spin.setValue(3)
         batch_form.addRow("测量方式", self.measurement_run_mode_combo)
-        batch_form.addRow("预计重复次数", self.batch_count_spin)
+        self.batch_import_source_combo = SidebarComboBox()
+        self.batch_import_source_combo.addItem("选择图片", "Files")
+        self.batch_import_source_combo.addItem("选择文件夹", "Folder")
+        self.batch_recursive_check = QCheckBox("含子目录")
+        self.batch_recursive_check.setChecked(False)
+        self.batch_recursive_check.setEnabled(False)
+        source_row = QHBoxLayout()
+        source_row.addWidget(self.batch_import_source_combo, stretch=1)
+        source_row.addWidget(self.batch_recursive_check)
+        batch_form.addRow("导入来源", source_row)
         batch_layout.addLayout(batch_form)
         btn_row1 = QHBoxLayout()
-        self.batch_import_mark1_upper_btn = QPushButton("导入 Mark1 上层/单图")
-        self.batch_import_mark1_lower_btn = QPushButton("导入 Mark1 下层")
+        self.batch_import_mark1_upper_btn = QPushButton("追加 M1 上层/单图")
+        self.batch_import_mark1_lower_btn = QPushButton("追加 M1 下层")
         btn_row1.addWidget(self.batch_import_mark1_upper_btn)
         btn_row1.addWidget(self.batch_import_mark1_lower_btn)
         btn_row2 = QHBoxLayout()
-        self.batch_import_mark2_upper_btn = QPushButton("导入 Mark2 上层/单图")
-        self.batch_import_mark2_lower_btn = QPushButton("导入 Mark2 下层")
+        self.batch_import_mark2_upper_btn = QPushButton("追加 M2 上层/单图")
+        self.batch_import_mark2_lower_btn = QPushButton("追加 M2 下层")
         btn_row2.addWidget(self.batch_import_mark2_upper_btn)
         btn_row2.addWidget(self.batch_import_mark2_lower_btn)
         self.batch_clear_btn = QPushButton("清空批量图像")
@@ -1687,7 +1825,11 @@ class MainWindow(QMainWindow):
         batch_layout.addWidget(self.batch_clear_btn)
         self.batch_image_table = QTableWidget()
         batch_layout.addWidget(self.batch_image_table)
-        batch_note = QLabel("批量测量会复用当前 Mark 的 ROI 模板和算法参数；点击顶部“计算对位偏差”后会自动计算所有已导入重复测量。")
+        batch_note = QLabel(
+            "可多选图片，也可选择文件夹自动导入；勾选“包含子文件夹”可扫描多级测量目录。重复文件会自动跳过。"
+            "双图模式下，上下层按追加后的列表顺序一一配对；"
+            "如需重新选择，请先清空批量图像。计算时会复用当前 Mark 的 ROI 模板和算法参数。"
+        )
         batch_note.setWordWrap(True)
         batch_note.setObjectName("statusCaption")
         batch_layout.addWidget(batch_note)
@@ -2048,6 +2190,9 @@ class MainWindow(QMainWindow):
         self.batch_import_mark2_lower_btn.clicked.connect(lambda: self.import_batch_images("Mark2", "lower"))
         self.batch_clear_btn.clicked.connect(self.clear_batch_images)
         self.measurement_run_mode_combo.currentIndexChanged.connect(self._refresh_all_widgets)
+        self.batch_import_source_combo.currentIndexChanged.connect(
+            lambda: self.batch_recursive_check.setEnabled(self._combo_value(self.batch_import_source_combo) == "Folder")
+        )
         if hasattr(self, "algorithm_path_button"):
             self.algorithm_path_button.clicked.connect(self.show_algorithm_path_dialog)
         self._install_button_feedback()
@@ -2197,9 +2342,43 @@ class MainWindow(QMainWindow):
 
     def _ensure_mark_runtime(self, mark_id: str):
         self.mark_images.setdefault(mark_id, {"upper": None, "lower": None})
+        self.mark_image_sources.setdefault(mark_id, {"upper": "none", "lower": "none"})
         self.auto_detections_by_mark.setdefault(mark_id, {})
         self.auto_candidates_by_mark.setdefault(mark_id, {})
         self.auto_selections.setdefault(mark_id, {"reference_label": "", "target_label": ""})
+
+    def _set_image_for_layer(self, mark_id: str, layer: str, image: Optional[ImageData], source: str):
+        self._ensure_mark_runtime(mark_id)
+        self.mark_images[mark_id][layer] = image
+        self.mark_image_sources[mark_id][layer] = source if image is not None else "none"
+
+    def _image_source(self, mark_id: str, layer: str) -> str:
+        self._ensure_mark_runtime(mark_id)
+        return self.mark_image_sources.get(mark_id, {}).get(layer, "none")
+
+    def _active_image_for_layer(self, mark_id: str, layer: str) -> Optional[ImageData]:
+        self._ensure_mark_runtime(mark_id)
+        image = self.mark_images[mark_id][layer]
+        if image is None:
+            return None
+        if not self._is_batch_mode() and self._image_source(mark_id, layer) == "batch_preview":
+            return None
+        return image
+
+    def _mark_images_snapshot_for_current_run(self) -> dict:
+        snapshot = {}
+        for mark_id in ("Mark1", "Mark2"):
+            snapshot[mark_id] = {
+                layer: self._active_image_for_layer(mark_id, layer)
+                for layer in ("upper", "lower")
+            }
+        return snapshot
+
+    def _switch_to_single_measurement_after_top_import(self):
+        if hasattr(self, "measurement_run_mode_combo"):
+            self._set_combo_value(self.measurement_run_mode_combo, "Single")
+        self.batch_overlays = {"Mark1": [], "Mark2": []}
+        self.batch_run_records = {"Mark1": [], "Mark2": []}
 
     def _current_auto_detections(self):
         mark_id = self._current_mark_id()
@@ -2209,8 +2388,8 @@ class MainWindow(QMainWindow):
     def _sync_current_mark_images(self):
         mark_id = self._current_mark_id()
         self._ensure_mark_runtime(mark_id)
-        self.upper_image = self.mark_images[mark_id]["upper"]
-        self.lower_image = self.mark_images[mark_id]["lower"]
+        self.upper_image = self._active_image_for_layer(mark_id, "upper")
+        self.lower_image = self._active_image_for_layer(mark_id, "lower")
         self.upper_canvas.set_image(self.upper_image)
         self.lower_canvas.set_image(self.lower_image)
 
@@ -2492,6 +2671,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "current_recipe_label"):
             recipe_display = self.loaded_recipe_display_name or self.recipe_name_edit.text().strip() or "未加载"
             self.current_recipe_label.setText(f"当前配方：{recipe_display}")
+            self.current_recipe_label.setToolTip(f"当前配方：{recipe_display}")
         if hasattr(self, "workflow_recipe_label"):
             recipe_display = self.loaded_recipe_display_name or self.recipe_name_edit.text().strip() or "未加载"
             self.workflow_recipe_label.setText(f"当前配方：{recipe_display}")
@@ -2583,8 +2763,10 @@ class MainWindow(QMainWindow):
 
     def _set_result_card(self, value_label: QLabel, unit_label: QLabel, value: str, unit: str, color: str = "#1D1D1F"):
         value_label.setText(value)
+        value_label.setProperty("resultColor", color)
         value_label.setStyleSheet(f"color: {color};")
         unit_label.setText(unit)
+        unit_label.setToolTip(unit)
 
     def _refresh_summary_cards(self):
         rows = self._build_summary_rows()
@@ -2601,12 +2783,16 @@ class MainWindow(QMainWindow):
             self._set_result_card(self.dx_value_label, self.dx_unit_label, f"{dx:+.3f}", "μm", "#007AFF")
             self._set_result_card(self.dy_value_label, self.dy_unit_label, f"{dy:+.3f}", "μm", "#FF9500")
             self._set_result_card(self.r_value_label, self.r_unit_label, f"{dxy:.3f}", "μm")
-            self._set_result_card(self.result_value_label, self.result_unit_label, verdict, first.get("提示", "") or "离线分析状态", color)
+            result_note = "符合规格" if verdict == "通过" else ("请复核" if verdict == "不通过" else "离线分析状态")
+            self._set_result_card(self.result_value_label, self.result_unit_label, verdict, result_note, color)
+            self.result_unit_label.setToolTip(first.get("提示", "") or result_note)
+            self._update_summary_typography()
             return
         self._set_result_card(self.dx_value_label, self.dx_unit_label, "--", "μm", "#007AFF")
         self._set_result_card(self.dy_value_label, self.dy_unit_label, "--", "μm", "#FF9500")
         self._set_result_card(self.r_value_label, self.r_unit_label, "--", "μm")
         self._set_result_card(self.result_value_label, self.result_unit_label, "待分析", "离线分析状态", "#6E6E73")
+        self._update_summary_typography()
 
     def _refresh_step_status(self, current_mark: str, show_auto: bool):
         imported = self._image_for_layer("upper", current_mark) is not None
@@ -2623,7 +2809,7 @@ class MainWindow(QMainWindow):
             ("完成" if result_ready else "待处理", "可导出结果" if result_ready else "等待计算"),
         ]
         colors = {"待处理": "#A1A1A6", "当前": "#007AFF", "完成": "#34C759", "异常": "#FF3B30"}
-        for idx, (row, dot, label, note, state_dot) in enumerate(self.step_rows):
+        for idx, (row, dot, label, note, state_dot) in enumerate(getattr(self, "step_rows", [])):
             state, detail = states[idx]
             color = colors[state]
             dot.setStyleSheet(f"color: {color}; border: 1px solid {color}; border-radius: 13px; font-weight: 700; background: #FFFFFF;")
@@ -2636,8 +2822,12 @@ class MainWindow(QMainWindow):
             status_text, status_color = "离线分析完成", "#34C759"
         else:
             status_text, status_color = "图像已加载", "#34C759"
-        self.workflow_status_dot.setStyleSheet(f"color: {status_color};")
-        self.workflow_status_label.setText(status_text)
+        if hasattr(self, "status_task_dot"):
+            self.status_task_dot.setStyleSheet(f"color: {status_color};")
+            self.status_task_label.setText(status_text)
+        if hasattr(self, "workflow_status_dot"):
+            self.workflow_status_dot.setStyleSheet(f"color: {status_color};")
+            self.workflow_status_label.setText(status_text)
 
     def _refresh_algorithm_path_panel(self, current_mark: str, show_auto: bool):
         if not hasattr(self, "algorithm_path_button"):
@@ -2655,6 +2845,9 @@ class MainWindow(QMainWindow):
         if reference is None and target is None:
             self.algorithm_path_text = "暂无测量结果；分析 ROI 或自动识别后可查看实际算法路径。"
             self.algorithm_path_button.setToolTip(self.algorithm_path_text)
+            if hasattr(self, "algorithm_path_summary_label"):
+                self.algorithm_path_summary_label.setText("算法路径：暂无测量结果")
+                self.algorithm_path_summary_label.setToolTip(self.algorithm_path_text)
             return
         parts = [f"当前 {current_mark}"]
         if reference is not None:
@@ -2663,6 +2856,12 @@ class MainWindow(QMainWindow):
             parts.append(f"待测({target_label})：{describe_algorithm_path(target, workflow)}")
         self.algorithm_path_text = "；".join(parts)
         self.algorithm_path_button.setToolTip(self.algorithm_path_text)
+        if hasattr(self, "algorithm_path_summary_label"):
+            compact = self.algorithm_path_text.replace("当前 ", "").replace("：", " · ")
+            if len(compact) > 38:
+                compact = compact[:37] + "…"
+            self.algorithm_path_summary_label.setText(f"算法路径：{compact}")
+            self.algorithm_path_summary_label.setToolTip(self.algorithm_path_text)
 
     def _refresh_tables(self):
         det_headers = [
@@ -2879,7 +3078,7 @@ class MainWindow(QMainWindow):
         if current is not None:
             return current
         for mark_id in ("Mark1", "Mark2"):
-            image = self.mark_images.get(mark_id, {}).get("upper")
+            image = self._active_image_for_layer(mark_id, "upper")
             if image is not None:
                 return image
         return None
@@ -3279,32 +3478,97 @@ class MainWindow(QMainWindow):
     def _is_batch_mode(self) -> bool:
         return hasattr(self, "measurement_run_mode_combo") and self._combo_value(self.measurement_run_mode_combo) == "Batch"
 
+    @staticmethod
+    def _batch_image_path_key(image: ImageData) -> str:
+        path = str(getattr(image, "path", "") or "")
+        if not path:
+            return f"<memory:{id(image)}>"
+        return str(Path(path).resolve(strict=False)).casefold()
+
+    @staticmethod
+    def _natural_path_sort_key(path: Path, root: Optional[Path] = None) -> tuple:
+        try:
+            text = str(path.relative_to(root)) if root is not None else path.name
+        except ValueError:
+            text = str(path)
+        parts = re.split(r"(\d+)", text.replace("\\", "/").casefold())
+        return tuple((1, int(part)) if part.isdigit() else (0, part) for part in parts if part)
+
+    @classmethod
+    def _collect_batch_paths(cls, folder: str, recursive: bool) -> list[str]:
+        root = Path(folder)
+        iterator = root.rglob("*") if recursive else root.iterdir()
+        paths = [
+            path
+            for path in iterator
+            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+        ]
+        paths.sort(key=lambda path: cls._natural_path_sort_key(path, root))
+        return [str(path) for path in paths]
+
+    @staticmethod
+    def _batch_source_folder_count(images: list[ImageData]) -> int:
+        folders = {
+            str(Path(image.path).resolve(strict=False).parent).casefold()
+            for image in images
+            if getattr(image, "path", "")
+        }
+        return len(folders)
+
+    def _append_batch_image_data(self, mark_id: str, layer: str, images: list[ImageData]) -> tuple[int, int]:
+        self._ensure_mark_runtime(mark_id)
+        target = self.batch_images.setdefault(mark_id, {}).setdefault(layer, [])
+        known_paths = {self._batch_image_path_key(image) for image in target}
+        added = 0
+        duplicates = 0
+        for image in images:
+            path_key = self._batch_image_path_key(image)
+            if path_key in known_paths:
+                duplicates += 1
+                continue
+            target.append(image)
+            known_paths.add(path_key)
+            added += 1
+
+        if added:
+            self.batch_run_records[mark_id] = []
+            self.batch_overlays[mark_id] = []
+            self._set_image_for_layer(mark_id, layer, target[0], "batch_preview")
+            self._invalidate_image_dependent_results(mark_id, layer)
+        return added, duplicates
+
     def import_batch_images(self, mark_id: str, layer: str):
-        title = f"批量导入 {mark_id} {LAYER_LABELS.get(layer, layer)}图像"
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            title,
-            "",
-            "图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;矩阵 (*.csv *.txt *.npy);;全部文件 (*)",
-        )
+        title = f"追加批量 {mark_id} {LAYER_LABELS.get(layer, layer)}图像"
+        import_source = self._combo_value(self.batch_import_source_combo)
+        if import_source == "Folder":
+            folder = QFileDialog.getExistingDirectory(self, title, "", QFileDialog.ShowDirsOnly)
+            paths = self._collect_batch_paths(folder, self.batch_recursive_check.isChecked()) if folder else []
+            if folder and not paths:
+                QMessageBox.warning(self, "未找到图像", "所选文件夹中没有可导入的图像或矩阵文件。")
+        else:
+            paths, _ = QFileDialog.getOpenFileNames(
+                self,
+                title,
+                "",
+                "图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;矩阵 (*.csv *.txt *.npy);;全部文件 (*)",
+            )
+            paths = sorted(paths, key=lambda path: self._natural_path_sort_key(Path(path)))
         if not paths:
             self._append_log(f"取消{title}。")
             return
         try:
-            self._ensure_mark_runtime(mark_id)
             images = [load_image(path) for path in paths]
-            self.batch_images[mark_id][layer] = images
-            self.batch_run_records[mark_id] = []
-            self.batch_overlays[mark_id] = []
-            # Use first repeat as preview image so ROI can be drawn/confirmed once.
-            if images:
-                self.mark_images[mark_id][layer] = images[0]
-                self._invalidate_image_dependent_results(mark_id, layer)
+            added, duplicates = self._append_batch_image_data(mark_id, layer, images)
             self._set_combo_value(self.measurement_run_mode_combo, "Batch")
             self._sync_current_mark_images()
             self._refresh_auto_selection_combos()
             self._refresh_all_widgets()
-            self._append_log(f"{title}完成：{len(images)} 张。")
+            total = len(self.batch_images[mark_id][layer])
+            folder_count = self._batch_source_folder_count(self.batch_images[mark_id][layer])
+            message = f"{title}完成：新增 {added} 张，当前共 {total} 张，来自 {folder_count} 个文件夹"
+            if duplicates:
+                message += f"；已跳过 {duplicates} 张重复文件"
+            self._append_log(message + "。")
         except Exception as exc:
             self._append_log(f"{title}失败：{exc}")
             QMessageBox.critical(self, "批量导入失败", str(exc))
@@ -3313,18 +3577,25 @@ class MainWindow(QMainWindow):
         self.batch_images = {"Mark1": {"upper": [], "lower": []}, "Mark2": {"upper": [], "lower": []}}
         self.batch_overlays = {"Mark1": [], "Mark2": []}
         self.batch_run_records = {"Mark1": [], "Mark2": []}
+        for mark_id in ("Mark1", "Mark2"):
+            for layer in ("upper", "lower"):
+                if self._image_source(mark_id, layer) == "batch_preview":
+                    self._set_image_for_layer(mark_id, layer, None, "none")
+        self._sync_current_mark_images()
         self._refresh_all_widgets()
         self._append_log("已清空批量图像和重复性结果。")
 
     def _refresh_batch_image_table(self):
         if not hasattr(self, "batch_image_table"):
             return
-        headers = ["Mark", "上层/单图数量", "下层数量", "状态"]
+        headers = ["Mark", "上层/单图", "下层", "状态"]
         rows = []
         is_dual = self._current_mode() == "Dual Image"
         for mark_id in ("Mark1", "Mark2"):
-            upper_count = len(self.batch_images.get(mark_id, {}).get("upper", []))
-            lower_count = len(self.batch_images.get(mark_id, {}).get("lower", []))
+            upper_images = self.batch_images.get(mark_id, {}).get("upper", [])
+            lower_images = self.batch_images.get(mark_id, {}).get("lower", [])
+            upper_count = len(upper_images)
+            lower_count = len(lower_images)
             if upper_count == 0:
                 status = "未导入"
             elif is_dual and lower_count == 0:
@@ -3333,7 +3604,12 @@ class MainWindow(QMainWindow):
                 status = "上下数量不一致"
             else:
                 status = "可批量计算"
-            rows.append([mark_id, str(upper_count), str(lower_count), status])
+            rows.append([
+                mark_id,
+                f"{upper_count}张/{self._batch_source_folder_count(upper_images)}目录",
+                f"{lower_count}张/{self._batch_source_folder_count(lower_images)}目录",
+                status,
+            ])
         self._fill_table(self.batch_image_table, headers, rows)
 
     def _refresh_repeatability_table(self):
@@ -3431,7 +3707,8 @@ class MainWindow(QMainWindow):
             return
         try:
             self._ensure_mark_runtime(mark_id)
-            self.mark_images[mark_id]["upper"] = load_image(path)
+            self._switch_to_single_measurement_after_top_import()
+            self._set_image_for_layer(mark_id, "upper", load_image(path), "single")
             self._invalidate_image_dependent_results(mark_id, "upper")
             self._sync_current_mark_images()
             self._refresh_auto_selection_combos()
@@ -3454,7 +3731,8 @@ class MainWindow(QMainWindow):
             return
         try:
             self._ensure_mark_runtime(mark_id)
-            self.mark_images[mark_id]["lower"] = load_image(path)
+            self._switch_to_single_measurement_after_top_import()
+            self._set_image_for_layer(mark_id, "lower", load_image(path), "single")
             self._invalidate_image_dependent_results(mark_id, "lower")
             self._sync_current_mark_images()
             self._refresh_auto_selection_combos()
@@ -3473,11 +3751,25 @@ class MainWindow(QMainWindow):
         self._refresh_all_widgets()
 
     def reset_measurement(self):
+        answer = QMessageBox.question(
+            self,
+            "重置测量",
+            "将清除所有已导入的单次和批量图像、全部测量结果以及所有 ROI。\n\n确定继续吗？",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self._clear_measurement_state()
+        self._append_log("测量已重置：图像、测量结果和 ROI 已全部清除。")
+
+    def _clear_measurement_state(self):
         self.marks = {"Mark1": MarkRecipe("Mark1"), "Mark2": MarkRecipe("Mark2")}
         self.mark_images = {
             "Mark1": {"upper": None, "lower": None},
             "Mark2": {"upper": None, "lower": None},
         }
+        self.mark_image_sources = self._empty_image_sources()
         self.detections.clear()
         self.overlays.clear()
         self.auto_detections_by_mark = {"Mark1": {}, "Mark2": {}}
@@ -3494,13 +3786,20 @@ class MainWindow(QMainWindow):
         self.loaded_recipe_path = ""
         self.loaded_recipe_display_name = ""
         self._recipe_roi_confirmation_signature = None
+        self.config.recipe_name = ""
+        if hasattr(self, "recipe_name_edit"):
+            self.recipe_name_edit.clear()
+        if hasattr(self, "measurement_run_mode_combo"):
+            self._set_combo_value(self.measurement_run_mode_combo, "Single")
         self.upper_canvas.set_circle_pick_mode(False)
         self.lower_canvas.set_circle_pick_mode(False)
         self.three_point_circle_btn.blockSignals(True)
         self.three_point_circle_btn.setChecked(False)
         self.three_point_circle_btn.blockSignals(False)
         self.mark_combo.setCurrentText("Mark1")
+        self.layer_combo.setCurrentIndex(0)
         self._sync_current_mark_images()
+        self.reset_canvas_views()
         self._refresh_auto_selection_combos()
         self._refresh_all_widgets()
 
@@ -3593,8 +3892,8 @@ class MainWindow(QMainWindow):
         mark_id = mark_id or self._current_mark_id()
         self._ensure_mark_runtime(mark_id)
         if self._current_mode() == "Single Image":
-            return self.mark_images[mark_id]["upper"]
-        return self.mark_images[mark_id][layer]
+            return self._active_image_for_layer(mark_id, "upper")
+        return self._active_image_for_layer(mark_id, layer)
 
     def _detect_one(self, mark: MarkRecipe, layer: str) -> DetectionResult:
         self._pull_config_from_ui()
@@ -3679,8 +3978,11 @@ class MainWindow(QMainWindow):
             return []
         usage = []
         for mark_id in ("Mark1", "Mark2"):
-            images = self.batch_images.get(mark_id, {}) if self._is_batch_mode() else self.mark_images.get(mark_id, {})
-            has_upper = bool(images.get("upper"))
+            if self._is_batch_mode():
+                images = self.batch_images.get(mark_id, {})
+                has_upper = bool(images.get("upper"))
+            else:
+                has_upper = self._active_image_for_layer(mark_id, "upper") is not None
             if not has_upper:
                 continue
             for layer in ("upper", "lower"):
@@ -3716,7 +4018,7 @@ class MainWindow(QMainWindow):
             "config": deepcopy(self.config),
             "params": deepcopy(self.params),
             "marks": deepcopy(self.marks),
-            "mark_images": {mark_id: dict(self.mark_images[mark_id]) for mark_id in ("Mark1", "Mark2")},
+            "mark_images": self._mark_images_snapshot_for_current_run(),
             "batch_images": {
                 mark_id: {layer: list(self.batch_images[mark_id][layer]) for layer in ("upper", "lower")}
                 for mark_id in ("Mark1", "Mark2")
@@ -3733,6 +4035,9 @@ class MainWindow(QMainWindow):
         self.cancel_progress_btn.setVisible(running)
         if running:
             self.progress_bar.setValue(0)
+            if hasattr(self, "status_task_dot"):
+                self.status_task_dot.setStyleSheet("color: #007AFF;")
+                self.status_task_label.setText("正在离线计算")
         for button in (
             self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn,
             self.save_recipe_btn, self.analyze_all_btn, self.export_btn,
@@ -3786,6 +4091,8 @@ class MainWindow(QMainWindow):
     def _on_calculation_progress(self, done: int, total: int, message: str):
         self.progress_bar.setValue(int(round(100.0 * done / max(1, total))))
         self.progress_stage_label.setText(message)
+        if hasattr(self, "status_task_label"):
+            self.status_task_label.setText(message)
         self.statusBar().showMessage(message)
 
     @Slot(object)
@@ -3831,6 +4138,65 @@ class MainWindow(QMainWindow):
         self.cancel_progress_btn.setEnabled(True)
         self._set_calculation_running(False)
         self._refresh_all_widgets()
+
+    def toggle_maximized(self):
+        if self.isMaximized():
+            self.showNormal()
+            self.maximize_btn.setText("□")
+            self.maximize_btn.setToolTip("最大化")
+        else:
+            self.showMaximized()
+            self.maximize_btn.setText("❐")
+            self.maximize_btn.setToolTip("还原")
+
+    def _update_summary_typography(self):
+        if not hasattr(self, "summary_panel"):
+            return
+        cell_width = max(1, self.summary_panel.width() // 4)
+        if cell_width >= 235:
+            point_size = 27
+        elif cell_width >= 185:
+            point_size = 23
+        elif cell_width >= 145:
+            point_size = 19
+        else:
+            point_size = 16
+        for label in (
+            self.dx_value_label,
+            self.dy_value_label,
+            self.r_value_label,
+            self.result_value_label,
+        ):
+            font = label.font()
+            font.setPointSize(point_size)
+            font.setWeight(QFont.Bold)
+            label.setFont(font)
+            color = label.property("resultColor") or "#1D1D1F"
+            label.setStyleSheet(f"color: {color}; font-size: {point_size}px; font-weight: 700;")
+
+    def _update_toolbar_density(self):
+        if not hasattr(self, "import_upper_btn"):
+            return
+        compact = self.width() < 1280
+        labels = {
+            self.import_upper_btn: "导入上层" if compact else "导入上层/单图",
+            self.import_lower_btn: "导入下层" if compact else "导入下层图像",
+            self.load_recipe_btn: "加载配方",
+            self.save_recipe_btn: "保存配方",
+            self.analyze_all_btn: "计算" if compact else "计算对位偏差",
+            self.export_btn: "导出" if compact else "导出结果",
+        }
+        for button, text in labels.items():
+            button.setText(text)
+        self.reset_measurement_btn.setText("重置" if compact else "重置测量")
+        self.analyze_roi_btn.setText("分析 ROI" if compact else "分析 ROI 区域")
+        self.display_enhance_check.setText("增强" if compact else "显示增强")
+        self.image_status_label.setVisible(not compact)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_summary_typography()
+        self._update_toolbar_density()
 
     def closeEvent(self, event):
         thread = self._calculation_thread

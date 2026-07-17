@@ -6,6 +6,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
 from overlay_measure.ui_main import MainWindow
@@ -23,8 +24,12 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     window.show()
     app.processEvents()
 
-    assert "V1.5.4" in window.windowTitle()
-    assert window.algorithm_path_button.text() == "算法路径"
+    assert "V1.5.5" in window.windowTitle()
+    assert window.windowFlags() & Qt.FramelessWindowHint
+    assert window.algorithm_path_button.text() == "查看"
+    assert window.algorithm_path_summary_label.text().startswith("算法路径：")
+    assert window.current_recipe_label.text() == "当前配方：未加载"
+    assert window.main_splitter.count() == 2
     assert not window.display_enhance_check.isChecked()
     assert window.result_tabs.count() == 3
     assert [window.result_tabs.tabText(i) for i in range(window.result_tabs.count())] == ["识别明细", "对位结果", "重复性分析"]
