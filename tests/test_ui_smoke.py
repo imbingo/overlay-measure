@@ -24,8 +24,13 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     window.show()
     app.processEvents()
 
-    assert "V1.5.5" in window.windowTitle()
+    assert "V1.5.6" in window.windowTitle()
     assert window.windowFlags() & Qt.FramelessWindowHint
+    assert window.title_bar.height() == 46
+    assert window.command_bar.objectName() == "commandBar"
+    assert window.version_label.text() == "V1.5.6"
+    assert not window.progress_bar.isHidden()
+    assert not window.cancel_progress_btn.isEnabled()
     assert window.algorithm_path_button.text() == "查看"
     assert window.algorithm_path_summary_label.text().startswith("算法路径：")
     assert window.current_recipe_label.text() == "当前配方：未加载"
@@ -83,6 +88,7 @@ def test_background_calculation_keeps_qt_event_loop_responsive(monkeypatch):
 
     assert not window._calculation_running
     assert "Mark1" in window.overlays
-    assert not window.progress_bar.isVisible()
+    assert not window.progress_bar.isHidden()
+    assert not window.cancel_progress_btn.isEnabled()
     window.close()
     app.processEvents()

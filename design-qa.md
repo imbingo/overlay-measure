@@ -1,38 +1,38 @@
 **Design QA**
 
-- Source visual truth: `C:\Users\bingo\.codex\generated_images\019ee4fa-2737-79e3-9919-bd2fffa16076\exec-4dab23bc-1351-4190-b353-c6ee57998a96.png`
-- Implementation screenshot: `C:\Users\bingo\Documents\New project\overlay-measure\design_qa\implementation-final-1500x920.png`
-- Combined comparison: `C:\Users\bingo\Documents\New project\overlay-measure\design_qa\comparison-final.png`
-- Responsive screenshot: `C:\Users\bingo\Documents\New project\overlay-measure\design_qa\implementation-1120x720.png`
+- Source visual truth: `C:\Users\bingo\.codex\generated_images\019ee4fa-2737-79e3-9919-bd2fffa16076\exec-3b847052-0c3e-498c-9496-94b3fda11402.png`
+- Implementation screenshot: `D:\CodingTool\overlay_measure\source\design_qa\implementation-v156-1500x920.png`
+- Responsive screenshot: `D:\CodingTool\overlay_measure\source\design_qa\implementation-v156-1120x720.png`
+- Combined comparison: `D:\CodingTool\overlay_measure\source\design_qa\comparison-v156.png`
 - Viewports: 1500 x 920 primary; 1120 x 720 compact.
-- State: dual-image manual ROI measurement, ROI settings selected, completed detections visible, result summary populated, and progress/status controls visible.
+- State: single-image manual ROI measurement, ROI settings selected, completed detections and overlay summary visible, validated recipe loaded, and persistent status/progress controls visible.
 
 **Full-View Comparison Evidence**
 
-- The implementation preserves the source hierarchy: compact top actions, wide dual-image canvas, fixed four-column result strip, tabbed result table, right-side numbered settings, and a complete bottom task/status row.
-- The redundant left workflow rail is absent in both the selected fusion direction and the implementation, leaving materially more horizontal space for images and result values.
-- The implementation intentionally keeps algorithm and specification controls in their numbered pages instead of duplicating them inside the ROI page. This preserves the existing V1.5.x workflow without changing measurement behavior.
-- Repository sample images differ from the microscope imagery in the source mockup, but they are semantically exact measurement images and are rendered at the intended scale and aspect ratio.
+- The implementation matches the approved hierarchy: compact product title bar, separate command bar, image-first workspace, right numbered configuration rail, stable four-column summary, one tabbed result area, and a full-width bottom status row.
+- Title-bar business actions are limited to recipe load/save; image import, reset, zoom, ROI analysis, overlay calculation, and export are grouped in the command bar as shown in the reference.
+- The implementation preserves the existing V1.5.x right-side controls and tables rather than replacing them with non-functional mock content. The resulting density is slightly higher than the concept but the regional proportions and interaction hierarchy remain aligned.
+- Repository sample imagery differs from the generated microscope image, but it is a real concentric-mark test image and keeps the correct grayscale aspect ratio and vector overlays.
 
 **Focused Region Evidence**
 
-- The 1120 x 720 screenshot validates the highest-risk regions: the top command bar remains usable, the dual image panes remain visible, and the four summary values remain on one line with responsive typography.
-- The bottom status row was checked in the 1500 x 920 progress state and retains task, recipe, stage, percentage, algorithm path, and cancellation controls.
-- No additional crop was required because the relevant dense controls and text remain readable in the full-resolution captures.
+- The original-resolution 1500 x 920 implementation screenshot was inspected for the title/command bars, summary typography, right-side controls, table, and bottom status row. All labels and primary actions are readable without overlap.
+- The 1120 x 720 screenshot validates the highest-risk compact state: command-bar labels shorten, four result values remain on one line, the right tab bar exposes overflow navigation, and persistent task/recipe/progress/path controls remain reachable.
+- No separate crop was needed because the source and implementation screenshots retain readable detail at their original resolution; the combined comparison confirms the full-region proportions.
 
 **Required Fidelity Surfaces**
 
-- Fonts and typography: Microsoft YaHei UI is used consistently; title, summary values, captions, tabs, and table text have distinct hierarchy. Summary values reduce from 27 px to 16 px according to available width without clipping.
-- Spacing and layout rhythm: 8 px application spacing, restrained 6–7 px radii, aligned toolbar controls, equal image tracks, equal summary columns, and a fixed-width right configuration rail match the selected direction.
-- Colors and visual tokens: neutral light-gray shell, white panels, dark image canvas, semantic blue/orange layer colors, green fit/pass state, red rejection/fail state, and blue primary action match the source vocabulary.
-- Image quality and asset fidelity: images preserve aspect ratio and native grayscale display by default; ROI, fitted contours, scale bars, axes, and labels remain crisp Qt vector overlays.
-- Copy and content: operator-facing controls remain Chinese, current recipe and algorithm path are retained, and duplicated workflow copy is removed.
+- Fonts and typography: Microsoft YaHei UI is used consistently. The title is reduced to 16 px/600 weight, the version is a restrained badge, summary values use responsive 27/23/19/16 px sizing, and no negative letter spacing is used.
+- Spacing and layout rhythm: 46 px title bar, dedicated command row, 8-10 px workspace rhythm, restrained 5-7 px radii, one stable four-column summary strip, and a 340-480 px right rail follow the selected design.
+- Colors and visual tokens: neutral `#F5F7FA` shell, white work surfaces, dark image canvas, blue primary action, blue/orange measurement axes, green pass/fit state, and red rejected points preserve the reference vocabulary.
+- Image quality and asset fidelity: measurement images are never stretched, display enhancement remains opt-in, and ROI/fitted outlines remain crisp Qt vector overlays. Native Qt action icons are used instead of emoji or handcrafted assets.
+- Copy and content: operator controls remain Chinese, duplicate workflow copy stays removed, and task state, recipe, progress, current stage, algorithm path, and cancellation remain visible.
 
 **Comparison History**
 
-- Iteration 1 findings: title labels inherited gray widget backgrounds; the compact-width title was clipped; the result cards used unnecessary nested borders; the bottom status information was incomplete in the visual hierarchy.
-- Fixes: made labels transparent, added compact toolbar labels below 1280 px, converted the summary to one divided strip, removed the left workflow rail, and consolidated task/recipe/progress/path/cancel controls in the status bar.
-- Post-fix evidence: `design_qa\implementation-final-1500x920.png` and `design_qa\implementation-1120x720.png` show the revised hierarchy and responsive behavior.
+- Iteration 1 finding: the first implementation retained a stale `等待导入图像` stage after a completed manual ROI result, creating a mismatch between the result strip and bottom status row.
+- Fix: idle status refresh now derives the stage and progress value from imported/result state; completed results show `离线分析完成` and 100%.
+- Post-fix evidence: `design_qa\implementation-v156-1500x920.png` shows consistent completed state across summary and status regions.
 
 **Findings**
 
@@ -40,14 +40,15 @@
 
 **Follow-up Polish**
 
-- [P3] A future Windows-native run can replace the standard Qt file/save icons with one consistent installed icon family if a branded visual system is introduced.
+- [P3] Native Qt file/save icons vary slightly by Windows theme; a future branded icon package could replace them without changing the layout.
 
 **Interactions Verified**
 
-- Frameless minimize, maximize/restore, close, and title-bar drag wiring.
-- Right-side numbered tab navigation and result tab creation.
-- Background measurement progress/cancel state.
-- Three-point circle mode preserves two selected points while right/middle-button panning to the third point.
-- Compact toolbar labels and responsive result typography at 1120 x 720.
+- Frameless title drag, double-click maximize/restore, minimize, maximize, and close wiring.
+- Command-bar mode, enhancement, import, reset, zoom out/percentage/zoom in, fit-to-window, ROI analysis, calculation, and export controls.
+- Right-side numbered configuration and result tabs.
+- Persistent progress/cancel state and background measurement completion.
+- Compact toolbar labels and summary typography at 1120 x 720.
+- Full regression suite: 25 tests passed.
 
 final result: passed

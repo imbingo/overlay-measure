@@ -1,5 +1,15 @@
 # Changelog
 
+## V1.5.6
+
+- Refined the frameless window against the approved fused measurement-workstation mockup.
+- Reduced the custom title bar to 46 px and limited it to product identity, version, recipe actions, and system window controls.
+- Moved image import, display mode, reset, zoom, ROI analysis, overlay calculation, and export into a dedicated command bar.
+- Added a direct zoom percentage selector while preserving wheel zoom, panning, and fit-to-window behavior.
+- Rebalanced the image workspace and right configuration rail, reduced result-table minimum height, and retained a stable four-column result summary.
+- Kept task state, current recipe, persistent progress, current stage, algorithm path, and cancellation visible in one non-jumping bottom status row.
+- Removed remaining emoji button labels and aligned controls to a restrained neutral-blue industrial visual system.
+
 ## V1.5.5
 
 - Reworked the desktop layout into a frameless, light industrial workspace based on the selected fused UI direction.

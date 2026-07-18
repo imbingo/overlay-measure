@@ -83,7 +83,7 @@ class FramelessTitleBar(QFrame):
         self.window = window
         self.drag_offset: Optional[QPoint] = None
         self.setObjectName("titleBar")
-        self.setFixedHeight(66)
+        self.setFixedHeight(46)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1304,7 +1304,7 @@ class MainWindow(QMainWindow):
             if font_path.exists() and QFontDatabase.addApplicationFont(str(font_path)) >= 0:
                 break
         self.setFont(QFont("Microsoft YaHei UI", 9))
-        self.setWindowTitle("对位偏差测量软件 V1.5.5")
+        self.setWindowTitle("对位偏差测量软件 V1.5.6")
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setMinimumSize(1120, 720)
         self.resize(1500, 920)
@@ -1381,61 +1381,73 @@ class MainWindow(QMainWindow):
 
     def _apply_window_style(self):
         self.setStyleSheet("""
-            QMainWindow, QWidget { background: #F4F6F8; color: #1D1D1F; }
+            QMainWindow, QWidget { background: #F5F7FA; color: #20242B; }
             QMainWindow { border: 1px solid #C9CED6; }
             QLabel { background: transparent; }
-            QFrame#titleBar { background: #FFFFFF; border: none; border-bottom: 1px solid #DADDE3; }
-            QLabel#titleLabel { font-size: 21px; font-weight: 700; color: #1D1D1F; }
-            QLabel#versionLabel, QLabel#recipeLabel, QLabel#statusCaption, QLabel#stepNote { color: #6E6E73; }
+            QFrame#titleBar { background: #FFFFFF; border: none; border-bottom: 1px solid #E3E7EC; }
+            QFrame#commandBar { background: #FFFFFF; border: none; border-bottom: 1px solid #E3E7EC; }
+            QLabel#brandDot { color: #2878D0; font-size: 15px; }
+            QLabel#titleLabel { font-size: 16px; font-weight: 600; color: #1D2530; }
+            QLabel#versionLabel { color: #2468B2; background: #EAF3FD; border: 1px solid #D6E8FA; border-radius: 6px; padding: 4px 9px; }
+            QLabel#recipeLabel, QLabel#statusCaption, QLabel#stepNote { color: #68717D; }
             QLabel#imageCardTitleUpper { color: #007AFF; font-size: 15px; font-weight: 700; }
             QLabel#imageCardTitleLower { color: #FF9500; font-size: 15px; font-weight: 700; }
-            QLabel#resultTitle { font-size: 12px; color: #6E6E73; }
-            QLabel#resultValue { font-size: 26px; font-weight: 700; color: #1D1D1F; }
-            QLabel#resultUnit { font-size: 12px; color: #6E6E73; }
-            QFrame#toolbarCard, QFrame#summaryCard, QFrame#imageCard, QFrame#tableCard { background: #FFFFFF; border: 1px solid #E0E4E9; border-radius: 7px; }
+            QLabel#resultTitle { font-size: 12px; color: #68717D; }
+            QLabel#resultValue { font-size: 27px; font-weight: 700; color: #1D2530; }
+            QLabel#resultUnit { font-size: 12px; color: #68717D; }
+            QFrame#summaryCard, QFrame#imageCard, QFrame#tableCard { background: #FFFFFF; border: 1px solid #DEE3E9; border-radius: 7px; }
             QWidget#metricCell { background: transparent; border: none; }
-            QGroupBox, QTableWidget, QPlainTextEdit { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 7px; margin-top: 8px; padding-top: 8px; }
-            QPlainTextEdit { padding: 8px; color: #1D1D1F; font-family: "Microsoft YaHei UI"; font-size: 12px; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #1D1D1F; font-weight: 600; }
-            QPushButton { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 7px; padding: 7px 12px; min-height: 20px; }
-            QPushButton:hover { background: #FAFAFB; border-color: #BFC5CF; }
-            QPushButton#primaryButton { background: #007AFF; color: #FFFFFF; border-color: #007AFF; font-weight: 600; }
+            QGroupBox, QTableWidget, QPlainTextEdit { background: #FFFFFF; border: 1px solid #D8DEE6; border-radius: 7px; margin-top: 8px; padding-top: 8px; }
+            QPlainTextEdit { padding: 8px; color: #20242B; font-family: "Microsoft YaHei UI"; font-size: 12px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #20242B; font-weight: 600; }
+            QPushButton { background: #FFFFFF; border: 1px solid #D6DCE4; border-radius: 6px; padding: 7px 12px; min-height: 20px; }
+            QPushButton:hover { background: #F7F9FB; border-color: #B9C2CE; }
+            QPushButton:pressed { background: #EEF2F6; }
+            QPushButton#primaryButton { background: #087EF4; color: #FFFFFF; border-color: #087EF4; font-weight: 600; padding-left: 18px; padding-right: 18px; }
+            QPushButton#primaryButton:hover { background: #006DDB; border-color: #006DDB; }
+            QPushButton#titleAction { border: none; background: transparent; padding: 5px 10px; min-height: 22px; }
+            QPushButton#titleAction:hover { background: #F2F5F8; }
+            QPushButton#zoomButton { min-width: 34px; max-width: 34px; padding: 6px 0; font-size: 16px; }
             QPushButton#windowButton { border: none; border-radius: 0; min-width: 36px; padding: 4px; background: transparent; font-size: 15px; }
             QPushButton#windowButton:hover { background: #EEF1F4; }
             QPushButton#closeButton { border: none; border-radius: 0; min-width: 38px; padding: 4px; background: transparent; font-size: 17px; }
             QPushButton#closeButton:hover { background: #E81123; color: #FFFFFF; }
-            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox { background: #FFFFFF; border: 1px solid #DADDE3; border-radius: 8px; padding: 5px 7px; min-height: 18px; }
+            QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox { background: #FFFFFF; border: 1px solid #D6DCE4; border-radius: 6px; padding: 5px 7px; min-height: 18px; }
             QTabWidget::pane { border: 1px solid #E0E4E9; border-radius: 7px; background: #FFFFFF; }
-            QTabBar::tab { background: #F4F6F8; border: 1px solid #E0E4E9; padding: 8px 11px; margin-right: 1px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
-            QTabBar::tab:selected { background: #FFFFFF; color: #007AFF; font-weight: 600; }
-            QTabWidget#sideTabs QTabBar::tab { padding: 8px 6px; font-size: 11px; }
+            QTabBar::tab { background: #F5F7FA; border: 1px solid #E0E4E9; padding: 8px 12px; margin-right: 1px; border-top-left-radius: 5px; border-top-right-radius: 5px; }
+            QTabBar::tab:selected { background: #FFFFFF; color: #087EF4; font-weight: 600; border-bottom-color: #FFFFFF; }
+            QTabWidget#sideTabs QTabBar::tab { padding: 9px 7px; font-size: 11px; }
             QToolButton#sectionToggle { text-align: left; font-weight: 600; padding: 9px 10px; background: #FFFFFF; border: 1px solid #E0E4E9; border-radius: 7px; }
             QScrollArea { border: none; background: #FFFFFF; }
-            QStatusBar { background: #FFFFFF; border-top: 1px solid #DADDE3; color: #4B5563; }
+            QStatusBar { background: #FFFFFF; border-top: 1px solid #DEE3E9; color: #4B5563; min-height: 36px; }
             QStatusBar::item { border: none; }
-            QProgressBar { border: 1px solid #CBD1D9; border-radius: 5px; background: #EEF1F4; text-align: center; }
-            QProgressBar::chunk { background: #007AFF; border-radius: 4px; }
+            QProgressBar { border: none; border-radius: 5px; background: #EDF1F5; text-align: center; color: #68717D; }
+            QProgressBar::chunk { background: #087EF4; border-radius: 4px; }
+            QSplitter::handle { background: #EEF1F4; width: 7px; }
         """)
 
     def _build_ui(self):
         central = QWidget()
         root = QVBoxLayout(central)
-        root.setContentsMargins(8, 0, 8, 8)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
         self.setCentralWidget(central)
 
         toolbar_card = FramelessTitleBar(self)
         self.title_bar = toolbar_card
         toolbar = QHBoxLayout(toolbar_card)
-        toolbar.setContentsMargins(12, 8, 6, 8)
-        toolbar.setSpacing(8)
+        toolbar.setContentsMargins(18, 5, 0, 5)
+        toolbar.setSpacing(6)
         title_row = QHBoxLayout()
-        title_row.setSpacing(8)
+        title_row.setSpacing(9)
+        self.brand_dot_label = QLabel("●")
+        self.brand_dot_label.setObjectName("brandDot")
         self.title_label = QLabel("对位偏差测量软件")
         self.title_label.setObjectName("titleLabel")
-        self.title_label.setMinimumWidth(185)
-        self.version_label = QLabel("V1.5.5")
+        self.title_label.setMinimumWidth(142)
+        self.version_label = QLabel("V1.5.6")
         self.version_label.setObjectName("versionLabel")
+        title_row.addWidget(self.brand_dot_label)
         title_row.addWidget(self.title_label)
         title_row.addWidget(self.version_label)
         title_row.addStretch(1)
@@ -1453,18 +1465,20 @@ class MainWindow(QMainWindow):
         self.analyze_all_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.export_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
         self.analyze_all_btn.setObjectName("primaryButton")
+        self.load_recipe_btn.setObjectName("titleAction")
+        self.save_recipe_btn.setObjectName("titleAction")
         toolbar.addLayout(title_row, stretch=1)
-        for btn in (self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn, self.save_recipe_btn, self.analyze_all_btn, self.export_btn):
+        for btn in (self.load_recipe_btn, self.save_recipe_btn):
             toolbar.addWidget(btn)
-        toolbar.addSpacing(4)
+        toolbar.addSpacing(10)
         self.minimize_btn = QPushButton("—")
         self.maximize_btn = QPushButton("□")
         self.close_btn = QPushButton("×")
         for button in (self.minimize_btn, self.maximize_btn):
             button.setObjectName("windowButton")
-            button.setFixedSize(38, 36)
+            button.setFixedSize(42, 45)
         self.close_btn.setObjectName("closeButton")
-        self.close_btn.setFixedSize(42, 36)
+        self.close_btn.setFixedSize(46, 45)
         self.minimize_btn.setToolTip("最小化")
         self.maximize_btn.setToolTip("最大化")
         self.close_btn.setToolTip("关闭")
@@ -1476,47 +1490,71 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.close_btn)
         root.addWidget(toolbar_card)
 
+        command_bar = QFrame()
+        command_bar.setObjectName("commandBar")
+        command_layout = QHBoxLayout(command_bar)
+        command_layout.setContentsMargins(18, 9, 18, 9)
+        command_layout.setSpacing(9)
+        self.command_bar = command_bar
+
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["单图模式", "双图模式"])
+        self.mode_combo.setMinimumWidth(108)
+        self.display_enhance_check = QCheckBox("显示增强")
+        self.display_enhance_check.setChecked(False)
+        self.reset_measurement_btn = QPushButton("重置")
+        self.zoom_out_btn = QPushButton("−")
+        self.zoom_out_btn.setObjectName("zoomButton")
+        self.zoom_level_combo = QComboBox()
+        self.zoom_level_combo.addItems(["50%", "75%", "100%", "125%", "150%", "200%"])
+        self.zoom_level_combo.setCurrentText("100%")
+        self.zoom_level_combo.setMinimumWidth(78)
+        self.zoom_in_btn = QPushButton("+")
+        self.zoom_in_btn.setObjectName("zoomButton")
+        self.reset_view_btn = QPushButton()
+        self.reset_view_btn.setIcon(self.style().standardIcon(QStyle.SP_TitleBarMaxButton))
+        self.reset_view_btn.setToolTip("适应窗口")
+        self.analyze_roi_btn = QPushButton("分析 ROI")
+        self.analyze_current_btn = QPushButton("计算当前对位")
+        self.analyze_current_btn.setVisible(False)
+        self.image_status_label = QLabel("等待导入图像")
+        self.image_status_label.setObjectName("statusCaption")
+        self.image_status_label.setVisible(False)
+
+        command_layout.addWidget(QLabel("图像模式"))
+        command_layout.addWidget(self.mode_combo)
+        command_layout.addWidget(self.display_enhance_check)
+        command_layout.addWidget(self.import_upper_btn)
+        command_layout.addWidget(self.import_lower_btn)
+        command_layout.addWidget(self.reset_measurement_btn)
+        command_layout.addSpacing(10)
+        command_layout.addWidget(self.zoom_out_btn)
+        command_layout.addWidget(self.zoom_level_combo)
+        command_layout.addWidget(self.zoom_in_btn)
+        command_layout.addWidget(self.reset_view_btn)
+        command_layout.addStretch(1)
+        command_layout.addWidget(self.analyze_roi_btn)
+        command_layout.addWidget(self.analyze_all_btn)
+        command_layout.addWidget(self.export_btn)
+        root.addWidget(command_bar)
+
+        workspace = QWidget()
+        workspace_layout = QVBoxLayout(workspace)
+        workspace_layout.setContentsMargins(10, 8, 10, 8)
+        workspace_layout.setSpacing(0)
+
         main_splitter = QSplitter(Qt.Horizontal)
         main_splitter.setChildrenCollapsible(False)
-        root.addWidget(main_splitter, stretch=3)
+        workspace_layout.addWidget(main_splitter)
+        root.addWidget(workspace, stretch=1)
 
         center = QWidget()
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 0, 0, 0)
         center_layout.setSpacing(10)
 
-        image_toolbar = QFrame()
-        image_toolbar.setObjectName("toolbarCard")
-        image_toolbar_layout = QHBoxLayout(image_toolbar)
-        image_toolbar_layout.setContentsMargins(12, 10, 12, 10)
-        image_toolbar_layout.setSpacing(8)
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["单图模式", "双图模式"])
-        self.mode_combo.setMinimumWidth(88)
-        self.display_enhance_check = QCheckBox("显示增强")
-        self.display_enhance_check.setChecked(False)
-        self.reset_measurement_btn = QPushButton("重置测量")
-        self.zoom_in_btn = QPushButton("放大")
-        self.zoom_out_btn = QPushButton("缩小")
-        self.reset_view_btn = QPushButton("复位")
-        self.analyze_roi_btn = QPushButton("分析 ROI 区域")
-        self.analyze_current_btn = QPushButton("计算当前对位")
-        self.analyze_current_btn.setVisible(False)
-        self.image_status_label = QLabel("等待导入图像")
-        self.image_status_label.setObjectName("statusCaption")
-        image_toolbar_layout.addWidget(QLabel("图像模式"))
-        image_toolbar_layout.addWidget(self.mode_combo)
-        image_toolbar_layout.addWidget(self.display_enhance_check)
-        image_toolbar_layout.addSpacing(8)
-        for btn in (self.reset_measurement_btn, self.zoom_in_btn, self.zoom_out_btn, self.reset_view_btn):
-            image_toolbar_layout.addWidget(btn)
-        image_toolbar_layout.addStretch(1)
-        image_toolbar_layout.addWidget(self.analyze_roi_btn)
-        image_toolbar_layout.addWidget(self.image_status_label)
-        center_layout.addWidget(image_toolbar)
-
         image_row = QHBoxLayout()
-        image_row.setSpacing(12)
+        image_row.setSpacing(8)
         self.upper_canvas = ImageCanvas("上层图像 / 单图", fixed_layer=None)
         self.lower_canvas = ImageCanvas("下层图像", fixed_layer="lower")
         self.upper_image_card = self._build_image_card("上层图像 / 单图", "upper", self.upper_canvas)
@@ -1559,7 +1597,7 @@ class MainWindow(QMainWindow):
         self.result_tabs.addTab(detail_tab, "识别明细")
         self.result_tabs.addTab(overlay_tab, "对位结果")
         self.result_tabs.addTab(repeat_tab, "重复性分析")
-        self.result_tabs.setMinimumHeight(340)
+        self.result_tabs.setMinimumHeight(255)
         result_layout.addWidget(self.result_tabs, stretch=1)
         center_layout.addWidget(result_card, stretch=4)
         main_splitter.addWidget(center)
@@ -1578,59 +1616,69 @@ class MainWindow(QMainWindow):
             scroll.setWidget(page)
             self.side_tabs.addTab(scroll, title)
         main_splitter.addWidget(self.side_tabs)
-        self.side_tabs.setMinimumWidth(330)
-        self.side_tabs.setMaximumWidth(440)
-        main_splitter.setSizes([1110, 360])
+        self.side_tabs.setMinimumWidth(340)
+        self.side_tabs.setMaximumWidth(480)
+        main_splitter.setSizes([1030, 450])
         self.main_splitter = main_splitter
         self._install_progress_status_widgets()
         self._install_algorithm_path_status_button()
 
     def _install_progress_status_widgets(self):
-        self.statusBar().setSizeGripEnabled(True)
+        self.statusBar().setSizeGripEnabled(False)
+        self.status_shell = QWidget()
+        self.status_shell_layout = QHBoxLayout(self.status_shell)
+        self.status_shell_layout.setContentsMargins(10, 2, 10, 2)
+        self.status_shell_layout.setSpacing(10)
         self.status_task_dot = QLabel("●")
         self.status_task_dot.setStyleSheet("color: #A1A1A6;")
-        self.status_task_label = QLabel("等待导入图像")
-        task_widget = QWidget()
-        task_layout = QHBoxLayout(task_widget)
-        task_layout.setContentsMargins(4, 0, 8, 0)
-        task_layout.setSpacing(6)
-        task_layout.addWidget(self.status_task_dot)
-        task_layout.addWidget(self.status_task_label)
-        self.statusBar().addWidget(task_widget, 1)
+        self.status_task_label = QLabel("任务状态：等待导入图像")
+        self.status_shell_layout.addWidget(self.status_task_dot)
+        self.status_shell_layout.addWidget(self.status_task_label)
 
         self.current_recipe_label = QLabel("当前配方：未加载")
         self.current_recipe_label.setObjectName("recipeLabel")
-        self.current_recipe_label.setMaximumWidth(260)
-        self.statusBar().addPermanentWidget(self.current_recipe_label)
+        self.current_recipe_label.setMinimumWidth(180)
+        self.current_recipe_label.setMaximumWidth(280)
+        self.status_shell_layout.addWidget(self.current_recipe_label)
+
+        progress_caption = QLabel("进度：")
+        progress_caption.setObjectName("statusCaption")
+        self.status_shell_layout.addWidget(progress_caption)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_bar.setFixedWidth(180)
-        self.progress_bar.setVisible(False)
-        self.progress_stage_label = QLabel("")
+        self.progress_bar.setFormat("%p%")
+        self.progress_bar.setFixedSize(190, 17)
+        self.progress_bar.setVisible(True)
+        self.status_shell_layout.addWidget(self.progress_bar)
+
+        self.progress_stage_label = QLabel("当前阶段：等待导入图像")
         self.progress_stage_label.setObjectName("statusCaption")
-        self.progress_stage_label.setVisible(False)
+        self.progress_stage_label.setMinimumWidth(170)
+        self.progress_stage_label.setVisible(True)
+        self.status_shell_layout.addWidget(self.progress_stage_label)
+        self.status_shell_layout.addStretch(1)
         self.cancel_progress_btn = QPushButton("取消计算")
-        self.cancel_progress_btn.setVisible(False)
+        self.cancel_progress_btn.setVisible(True)
+        self.cancel_progress_btn.setEnabled(False)
         self.cancel_progress_btn.clicked.connect(self.cancel_calculation)
-        self.statusBar().addPermanentWidget(self.progress_stage_label)
-        self.statusBar().addPermanentWidget(self.progress_bar)
+        self.statusBar().addPermanentWidget(self.status_shell, 1)
 
     def _install_algorithm_path_status_button(self):
         self.algorithm_path_text = "暂无测量结果；分析 ROI 或自动识别后可查看实际算法路径。"
         self.algorithm_path_summary_label = QLabel("算法路径：暂无测量结果")
         self.algorithm_path_summary_label.setObjectName("statusCaption")
-        self.algorithm_path_summary_label.setMinimumWidth(140)
-        self.algorithm_path_summary_label.setMaximumWidth(280)
+        self.algorithm_path_summary_label.setMinimumWidth(170)
+        self.algorithm_path_summary_label.setMaximumWidth(330)
         self.algorithm_path_button = QToolButton()
         self.algorithm_path_button.setText("查看")
         self.algorithm_path_button.setAutoRaise(True)
         self.algorithm_path_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.algorithm_path_button.setToolTip(self.algorithm_path_text)
-        self.statusBar().addPermanentWidget(self.algorithm_path_summary_label)
-        self.statusBar().addPermanentWidget(self.algorithm_path_button)
-        self.statusBar().addPermanentWidget(self.cancel_progress_btn)
+        self.status_shell_layout.addWidget(self.algorithm_path_summary_label)
+        self.status_shell_layout.addWidget(self.algorithm_path_button)
+        self.status_shell_layout.addWidget(self.cancel_progress_btn)
 
     def _build_image_card(self, title: str, layer: str, canvas: ImageCanvas) -> QWidget:
         # V1.2：去掉图像区顶部的大标题条，减少占用空间，保留画布本身。
@@ -1699,8 +1747,8 @@ class MainWindow(QMainWindow):
         card = QWidget()
         card.setObjectName("metricCell")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 7, 14, 7)
-        layout.setSpacing(1)
+        layout.setContentsMargins(18, 8, 18, 8)
+        layout.setSpacing(2)
         title_label = QLabel(title)
         title_label.setObjectName("resultTitle")
         value_label = QLabel("--")
@@ -1718,8 +1766,8 @@ class MainWindow(QMainWindow):
         card = QFrame()
         card.setObjectName("summaryCard")
         # V1.3.1：压缩顶部结果卡片高度，把更多垂直空间让给“对位结果/重复性分析”。
-        card.setMaximumHeight(104)
-        card.setMinimumHeight(88)
+        card.setMaximumHeight(112)
+        card.setMinimumHeight(96)
         layout = QHBoxLayout(card)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(0)
@@ -2136,6 +2184,7 @@ class MainWindow(QMainWindow):
         self.reset_measurement_btn.clicked.connect(self.reset_measurement)
         self.zoom_in_btn.clicked.connect(lambda: self.zoom_canvases(1.25))
         self.zoom_out_btn.clicked.connect(lambda: self.zoom_canvases(0.8))
+        self.zoom_level_combo.currentTextChanged.connect(self.set_canvas_zoom_percent)
         self.reset_view_btn.clicked.connect(self.reset_canvas_views)
         self.mark_combo.currentTextChanged.connect(self.on_active_roi_selection_changed)
         self.layer_combo.currentTextChanged.connect(self.on_active_roi_selection_changed)
@@ -2558,8 +2607,8 @@ class MainWindow(QMainWindow):
         current_mark = self.mark_combo.currentText() or "Mark1"
         current_layer = self._current_layer()
         is_dual = self._current_mode() == "Dual Image"
-        self.import_upper_btn.setText("📂 导入上层/单图")
-        self.import_lower_btn.setText("📁 导入下层图像")
+        self.import_upper_btn.setText("导入上层/单图")
+        self.import_lower_btn.setText("导入下层图像")
         self.upper_canvas.title = "上层图像" if is_dual else "单图图像"
         self.lower_canvas.title = "下层图像"
         if hasattr(self, "upper_image_card"):
@@ -2700,6 +2749,7 @@ class MainWindow(QMainWindow):
             self._refresh_step_status(current_mark, show_auto)
         if hasattr(self, "_refresh_algorithm_path_panel"):
             self._refresh_algorithm_path_panel(current_mark, show_auto)
+        self._update_toolbar_density()
 
     def _refresh_mark_combo(self):
         self.marks = {
@@ -2824,7 +2874,17 @@ class MainWindow(QMainWindow):
             status_text, status_color = "图像已加载", "#34C759"
         if hasattr(self, "status_task_dot"):
             self.status_task_dot.setStyleSheet(f"color: {status_color};")
-            self.status_task_label.setText(status_text)
+            self.status_task_label.setText(f"任务状态：{status_text}")
+        if hasattr(self, "progress_stage_label") and not self._calculation_running:
+            if result_ready:
+                self.progress_bar.setValue(100)
+                self.progress_stage_label.setText("当前阶段：离线分析完成")
+            elif imported:
+                self.progress_bar.setValue(0)
+                self.progress_stage_label.setText("当前阶段：图像已加载，等待计算")
+            else:
+                self.progress_bar.setValue(0)
+                self.progress_stage_label.setText("当前阶段：等待导入图像")
         if hasattr(self, "workflow_status_dot"):
             self.workflow_status_dot.setStyleSheet(f"color: {status_color};")
             self.workflow_status_label.setText(status_text)
@@ -3008,10 +3068,35 @@ class MainWindow(QMainWindow):
         self.upper_canvas.zoom_by(factor)
         if self.lower_canvas.isVisible():
             self.lower_canvas.zoom_by(factor)
+        self._sync_zoom_level_display()
+
+    def set_canvas_zoom_percent(self, text: str):
+        if not text or not text.endswith("%"):
+            return
+        try:
+            zoom = float(text[:-1]) / 100.0
+        except ValueError:
+            return
+        for canvas in (self.upper_canvas, self.lower_canvas):
+            canvas.user_zoom = float(np.clip(zoom, 0.05, 80.0))
+            canvas.pan_x = 0.0
+            canvas.pan_y = 0.0
+            canvas.update()
 
     def reset_canvas_views(self):
         self.upper_canvas.reset_view(update=True)
         self.lower_canvas.reset_view(update=True)
+        self._sync_zoom_level_display()
+
+    def _sync_zoom_level_display(self):
+        if not hasattr(self, "zoom_level_combo"):
+            return
+        zoom_text = f"{int(round(self.upper_canvas.user_zoom * 100.0))}%"
+        self.zoom_level_combo.blockSignals(True)
+        if self.zoom_level_combo.findText(zoom_text) < 0:
+            self.zoom_level_combo.addItem(zoom_text)
+        self.zoom_level_combo.setCurrentText(zoom_text)
+        self.zoom_level_combo.blockSignals(False)
 
     def _crop_roi_image(self, image: Optional[ImageData], roi: Optional[Roi], path: Path):
         if image is None or roi is None:
@@ -4030,14 +4115,15 @@ class MainWindow(QMainWindow):
 
     def _set_calculation_running(self, running: bool):
         self._calculation_running = bool(running)
-        self.progress_bar.setVisible(running)
-        self.progress_stage_label.setVisible(running)
-        self.cancel_progress_btn.setVisible(running)
+        self.progress_bar.setVisible(True)
+        self.progress_stage_label.setVisible(True)
+        self.cancel_progress_btn.setVisible(True)
+        self.cancel_progress_btn.setEnabled(running)
         if running:
             self.progress_bar.setValue(0)
             if hasattr(self, "status_task_dot"):
                 self.status_task_dot.setStyleSheet("color: #007AFF;")
-                self.status_task_label.setText("正在离线计算")
+                self.status_task_label.setText("任务状态：正在离线计算")
         for button in (
             self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn,
             self.save_recipe_btn, self.analyze_all_btn, self.export_btn,
@@ -4055,7 +4141,7 @@ class MainWindow(QMainWindow):
             return
         job = self._calculation_job_snapshot()
         self._set_calculation_running(True)
-        self.progress_stage_label.setText("正在准备后台计算")
+        self.progress_stage_label.setText("当前阶段：正在准备后台计算")
         self._append_log(
             "计算路径：全图自动识别（不使用 ROI）"
             if self._is_auto_workflow()
@@ -4085,14 +4171,14 @@ class MainWindow(QMainWindow):
         if self._calculation_worker is not None:
             self._calculation_worker.cancel()
             self.cancel_progress_btn.setEnabled(False)
-            self.progress_stage_label.setText("正在取消，当前算法步骤完成后停止")
+            self.progress_stage_label.setText("当前阶段：正在取消，当前算法步骤完成后停止")
 
     @Slot(int, int, str)
     def _on_calculation_progress(self, done: int, total: int, message: str):
         self.progress_bar.setValue(int(round(100.0 * done / max(1, total))))
-        self.progress_stage_label.setText(message)
+        self.progress_stage_label.setText(f"当前阶段：{message}")
         if hasattr(self, "status_task_label"):
-            self.status_task_label.setText(message)
+            self.status_task_label.setText(f"任务状态：{message}")
         self.statusBar().showMessage(message)
 
     @Slot(object)
@@ -4135,8 +4221,11 @@ class MainWindow(QMainWindow):
     def _on_calculation_thread_finished(self):
         self._calculation_worker = None
         self._calculation_thread = None
-        self.cancel_progress_btn.setEnabled(True)
         self._set_calculation_running(False)
+        if self.progress_bar.value() >= 100:
+            self.progress_stage_label.setText("当前阶段：计算完成")
+        elif "取消" in self.progress_stage_label.text():
+            self.progress_stage_label.setText("当前阶段：计算已取消")
         self._refresh_all_widgets()
 
     def toggle_maximized(self):
@@ -4188,10 +4277,10 @@ class MainWindow(QMainWindow):
         }
         for button, text in labels.items():
             button.setText(text)
-        self.reset_measurement_btn.setText("重置" if compact else "重置测量")
-        self.analyze_roi_btn.setText("分析 ROI" if compact else "分析 ROI 区域")
+        self.reset_measurement_btn.setText("重置")
+        self.analyze_roi_btn.setText("分析 ROI")
         self.display_enhance_check.setText("增强" if compact else "显示增强")
-        self.image_status_label.setVisible(not compact)
+        self.image_status_label.setVisible(False)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
