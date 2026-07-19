@@ -24,11 +24,18 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     window.show()
     app.processEvents()
 
-    assert "V1.5.6" in window.windowTitle()
+    assert "V1.5.7" in window.windowTitle()
     assert window.windowFlags() & Qt.FramelessWindowHint
     assert window.title_bar.height() == 46
     assert window.command_bar.objectName() == "commandBar"
-    assert window.version_label.text() == "V1.5.6"
+    assert window.version_label.text() == "V1.5.7"
+    assert window.recipe_manage_btn.text() == "配方管理"
+    assert window.load_recipe_btn.text().startswith("当前配方：未加载")
+    window.show_recipe_quick_menu()
+    app.processEvents()
+    assert window.recipe_quick_menu is not None
+    assert window.recipe_quick_menu.tree.columnCount() == 5
+    window.recipe_quick_menu.hide()
     assert not window.progress_bar.isHidden()
     assert not window.cancel_progress_btn.isEnabled()
     assert window.algorithm_path_button.text() == "查看"

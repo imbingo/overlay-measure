@@ -10,10 +10,11 @@ from typing import Dict, Optional
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, QThread, Qt, Signal, Slot
-from PySide6.QtGui import QAction, QColor, QFont, QFontDatabase, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
+from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, QThread, Qt, QUrl, Signal, Slot
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFrame,
     QGridLayout,
     QCheckBox,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -38,8 +40,11 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTabWidget,
     QToolButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from .auto_mark_detector import detect_auto_marks_with_report
@@ -52,6 +57,7 @@ from .models import DetectionParams, DetectionResult, ImageData, MarkRecipe, Mea
 from .overlay_calculator import calculate_overlay, calculate_relative_overlay
 from .production_measurement import refine_candidate
 from .recipe_manager import load_recipe, save_recipe
+from .recipe_library import RecipeLibrary, RecipeLibraryEntry
 from .result_exporter import build_detection_rows, export_results
 from .rz_calculator import build_summary_rows
 
@@ -1297,6 +1303,284 @@ class MeasurementWorker(QObject):
         self._cancel_requested = True
 
 
+class RecipeQuickMenu(QMenu):
+    recipeSelected = Signal(str)
+    importRequested = Signal()
+    managerRequested = Signal()
+    openLibraryRequested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("recipeQuickMenu")
+        self.setMinimumWidth(540)
+        self._entries: list[RecipeLibraryEntry] = []
+
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(12, 12, 12, 10)
+        layout.setSpacing(9)
+
+        heading = QHBoxLayout()
+        title = QLabel("快速切换配方")
+        title.setObjectName("recipeMenuTitle")
+        hint = QLabel("双击即可加载")
+        hint.setObjectName("recipeMenuHint")
+        heading.addWidget(title)
+        heading.addStretch(1)
+        heading.addWidget(hint)
+        layout.addLayout(heading)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("搜索配方名称、物料编码或版本")
+        self.search_edit.setClearButtonEnabled(True)
+        layout.addWidget(self.search_edit)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["配方名称", "物料编码", "版本", "状态", "来源"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setAlternatingRowColors(False)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setMinimumHeight(285)
+        self.tree.setSelectionMode(QTreeWidget.SingleSelection)
+        self.tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        for column, width in ((1, 100), (2, 64), (3, 76), (4, 56)):
+            self.tree.header().setSectionResizeMode(column, QHeaderView.Fixed)
+            self.tree.setColumnWidth(column, width)
+        layout.addWidget(self.tree)
+
+        action_row = QHBoxLayout()
+        self.import_btn = QPushButton("从文件导入…")
+        self.manager_btn = QPushButton("配方管理…")
+        self.open_library_btn = QPushButton("打开配方库")
+        action_row.addWidget(self.import_btn)
+        action_row.addWidget(self.manager_btn)
+        action_row.addStretch(1)
+        action_row.addWidget(self.open_library_btn)
+        layout.addLayout(action_row)
+
+        action = QWidgetAction(self)
+        action.setDefaultWidget(host)
+        self.addAction(action)
+        self.search_edit.textChanged.connect(self._populate)
+        self.tree.itemDoubleClicked.connect(self._activate_item)
+        self.tree.itemActivated.connect(self._activate_item)
+        self.import_btn.clicked.connect(self._request_import)
+        self.manager_btn.clicked.connect(self._request_manager)
+        self.open_library_btn.clicked.connect(self._request_open_library)
+
+    def set_entries(self, entries: list[RecipeLibraryEntry]) -> None:
+        self._entries = list(entries)
+        self.search_edit.clear()
+        self._populate()
+
+    @staticmethod
+    def _matches(entry: RecipeLibraryEntry, query: str) -> bool:
+        haystack = " ".join((entry.name, entry.material_code, entry.version, entry.status, entry.source)).lower()
+        return query in haystack
+
+    @staticmethod
+    def _status_text(status: str) -> str:
+        mapping = {
+            "validated": "已验证",
+            "approved": "已批准",
+            "released": "已发布",
+            "draft": "草稿",
+            "archived": "已归档",
+            "obsolete": "已停用",
+        }
+        return mapping.get(status.strip().lower(), status or "未验证")
+
+    def _add_entry(self, entry: RecipeLibraryEntry, prefix: str = "") -> None:
+        label = f"{prefix}{entry.name}"
+        status_text = self._status_text(entry.status)
+        item = QTreeWidgetItem([label, entry.material_code, entry.version, status_text, entry.source])
+        item.setData(0, Qt.UserRole, str(entry.path))
+        item.setToolTip(0, str(entry.path))
+        if entry.favorite:
+            item.setForeground(0, QColor("#B77900"))
+        if "验证" in status_text or "批准" in status_text or "发布" in status_text:
+            item.setForeground(3, QColor("#248A3D"))
+        self.tree.addTopLevelItem(item)
+
+    def _add_section(self, title: str) -> None:
+        item = QTreeWidgetItem([title, "", "", "", ""])
+        item.setFlags(Qt.ItemIsEnabled)
+        font = item.font(0)
+        font.setBold(True)
+        item.setFont(0, font)
+        item.setForeground(0, QColor("#68717D"))
+        item.setBackground(0, QColor("#F4F6F8"))
+        self.tree.addTopLevelItem(item)
+        self.tree.setFirstColumnSpanned(self.tree.indexOfTopLevelItem(item), self.tree.rootIndex(), True)
+
+    def _populate(self) -> None:
+        query = self.search_edit.text().strip().lower()
+        self.tree.clear()
+        if query:
+            for entry in self._entries:
+                if self._matches(entry, query):
+                    self._add_entry(entry, "★ " if entry.favorite else "")
+        else:
+            favorites = [entry for entry in self._entries if entry.favorite]
+            recent = sorted(
+                (entry for entry in self._entries if entry.last_used and not entry.favorite),
+                key=lambda entry: entry.last_used,
+                reverse=True,
+            )[:8]
+            remaining = [entry for entry in self._entries if entry not in favorites and entry not in recent]
+            if favorites:
+                self._add_section("已固定")
+                for entry in favorites[:8]:
+                    self._add_entry(entry, "★ ")
+            if recent:
+                self._add_section("最近使用")
+                for entry in recent:
+                    self._add_entry(entry)
+            if remaining or not self._entries:
+                self._add_section("全部配方")
+                for entry in remaining:
+                    self._add_entry(entry)
+        if not self._entries:
+            empty = QTreeWidgetItem(["配方库暂无配方，可从文件导入", "", "", "", ""])
+            empty.setFlags(Qt.ItemIsEnabled)
+            empty.setForeground(0, QColor("#8A939F"))
+            self.tree.addTopLevelItem(empty)
+
+    def _activate_item(self, item: QTreeWidgetItem, _column: int = 0) -> None:
+        path = item.data(0, Qt.UserRole)
+        if path:
+            self.hide()
+            self.recipeSelected.emit(str(path))
+
+    def _request_import(self) -> None:
+        self.hide()
+        self.importRequested.emit()
+
+    def _request_manager(self) -> None:
+        self.hide()
+        self.managerRequested.emit()
+
+    def _request_open_library(self) -> None:
+        self.hide()
+        self.openLibraryRequested.emit()
+
+
+class RecipeLibraryDialog(QDialog):
+    def __init__(self, library: RecipeLibrary, parent=None):
+        super().__init__(parent)
+        self.library = library
+        self.selected_recipe_path = ""
+        self.setWindowTitle("配方管理")
+        self.resize(920, 560)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 14)
+        root.setSpacing(10)
+
+        top = QHBoxLayout()
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("搜索配方名称、物料编码、版本或状态")
+        self.search_edit.setClearButtonEnabled(True)
+        self.source_combo = QComboBox()
+        self.source_combo.addItems(["全部来源", "本机", "共享"])
+        top.addWidget(self.search_edit, 1)
+        top.addWidget(self.source_combo)
+        root.addLayout(top)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["收藏", "配方名称", "物料编码", "版本", "状态", "来源", "文件路径"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setSelectionMode(QTreeWidget.SingleSelection)
+        self.tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tree.header().setSectionResizeMode(6, QHeaderView.Stretch)
+        for column, width in ((0, 52), (2, 120), (3, 70), (4, 90), (5, 62)):
+            self.tree.header().setSectionResizeMode(column, QHeaderView.Fixed)
+            self.tree.setColumnWidth(column, width)
+        root.addWidget(self.tree, 1)
+
+        shared = self.library.shared_library
+        self.shared_label = QLabel(f"共享配方库：{shared if shared else '未配置'}")
+        self.shared_label.setObjectName("recipeMenuHint")
+        root.addWidget(self.shared_label)
+
+        actions = QHBoxLayout()
+        self.import_btn = QPushButton("从文件导入…")
+        self.favorite_btn = QPushButton("切换收藏")
+        self.shared_btn = QPushButton("设置共享目录…")
+        self.clear_shared_btn = QPushButton("清除共享目录")
+        self.open_btn = QPushButton("打开本机配方库")
+        self.load_btn = QPushButton("加载所选配方")
+        self.load_btn.setObjectName("primaryButton")
+        self.close_btn = QPushButton("关闭")
+        for button in (self.import_btn, self.favorite_btn, self.shared_btn, self.clear_shared_btn, self.open_btn):
+            actions.addWidget(button)
+        actions.addStretch(1)
+        actions.addWidget(self.load_btn)
+        actions.addWidget(self.close_btn)
+        root.addLayout(actions)
+
+        self.search_edit.textChanged.connect(self.refresh)
+        self.source_combo.currentTextChanged.connect(self.refresh)
+        self.favorite_btn.clicked.connect(self._toggle_favorite)
+        self.shared_btn.clicked.connect(self._choose_shared_directory)
+        self.clear_shared_btn.clicked.connect(self._clear_shared_directory)
+        self.open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.library.root))))
+        self.load_btn.clicked.connect(self._accept_selected)
+        self.tree.itemDoubleClicked.connect(lambda *_: self._accept_selected())
+        self.close_btn.clicked.connect(self.reject)
+        self.refresh()
+
+    def refresh(self) -> None:
+        query = self.search_edit.text().strip().lower()
+        source = self.source_combo.currentText()
+        self.tree.clear()
+        for entry in self.library.scan():
+            if source != "全部来源" and entry.source != source:
+                continue
+            if query and not RecipeQuickMenu._matches(entry, query):
+                continue
+            item = QTreeWidgetItem([
+                "★" if entry.favorite else "",
+                entry.name,
+                entry.material_code,
+                entry.version,
+                RecipeQuickMenu._status_text(entry.status),
+                entry.source,
+                str(entry.path),
+            ])
+            item.setData(0, Qt.UserRole, str(entry.path))
+            self.tree.addTopLevelItem(item)
+        self.shared_label.setText(f"共享配方库：{self.library.shared_library or '未配置'}")
+
+    def _selected_path(self) -> str:
+        item = self.tree.currentItem()
+        return str(item.data(0, Qt.UserRole)) if item and item.data(0, Qt.UserRole) else ""
+
+    def _toggle_favorite(self) -> None:
+        path = self._selected_path()
+        if path:
+            self.library.toggle_favorite(path)
+            self.refresh()
+
+    def _choose_shared_directory(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "选择共享配方库目录", str(self.library.shared_library or ""))
+        if path:
+            self.library.set_shared_library(path)
+            self.refresh()
+
+    def _clear_shared_directory(self) -> None:
+        self.library.set_shared_library(None)
+        self.refresh()
+
+    def _accept_selected(self) -> None:
+        path = self._selected_path()
+        if not path:
+            QMessageBox.information(self, "未选择配方", "请先选择一个配方。")
+            return
+        self.selected_recipe_path = path
+        self.accept()
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1304,7 +1588,7 @@ class MainWindow(QMainWindow):
             if font_path.exists() and QFontDatabase.addApplicationFont(str(font_path)) >= 0:
                 break
         self.setFont(QFont("Microsoft YaHei UI", 9))
-        self.setWindowTitle("对位偏差测量软件 V1.5.6")
+        self.setWindowTitle("对位偏差测量软件 V1.5.7")
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setMinimumSize(1120, 720)
         self.resize(1500, 920)
@@ -1344,6 +1628,8 @@ class MainWindow(QMainWindow):
         self.roi_sources = self._empty_roi_sources()
         self.loaded_recipe_path = ""
         self.loaded_recipe_display_name = ""
+        self.recipe_library = RecipeLibrary()
+        self.recipe_quick_menu: Optional[RecipeQuickMenu] = None
         self._recipe_roi_confirmation_signature = None
         self._calculation_thread: Optional[QThread] = None
         self._calculation_worker: Optional[MeasurementWorker] = None
@@ -1389,6 +1675,8 @@ class MainWindow(QMainWindow):
             QLabel#brandDot { color: #2878D0; font-size: 15px; }
             QLabel#titleLabel { font-size: 16px; font-weight: 600; color: #1D2530; }
             QLabel#versionLabel { color: #2468B2; background: #EAF3FD; border: 1px solid #D6E8FA; border-radius: 6px; padding: 4px 9px; }
+            QLabel#recipeMenuTitle { color: #1D2530; font-size: 14px; font-weight: 700; }
+            QLabel#recipeMenuHint { color: #7A8491; }
             QLabel#recipeLabel, QLabel#statusCaption, QLabel#stepNote { color: #68717D; }
             QLabel#imageCardTitleUpper { color: #007AFF; font-size: 15px; font-weight: 700; }
             QLabel#imageCardTitleLower { color: #FF9500; font-size: 15px; font-weight: 700; }
@@ -1407,6 +1695,8 @@ class MainWindow(QMainWindow):
             QPushButton#primaryButton:hover { background: #006DDB; border-color: #006DDB; }
             QPushButton#titleAction { border: none; background: transparent; padding: 5px 10px; min-height: 22px; }
             QPushButton#titleAction:hover { background: #F2F5F8; }
+            QPushButton#recipeSwitcher { background: #F7F9FB; border: 1px solid #DCE2E9; border-radius: 7px; padding: 6px 12px; text-align: left; min-width: 190px; }
+            QPushButton#recipeSwitcher:hover { background: #EEF5FC; border-color: #B9D2EB; }
             QPushButton#zoomButton { min-width: 34px; max-width: 34px; padding: 6px 0; font-size: 16px; }
             QPushButton#windowButton { border: none; border-radius: 0; min-width: 36px; padding: 4px; background: transparent; font-size: 15px; }
             QPushButton#windowButton:hover { background: #EEF1F4; }
@@ -1424,6 +1714,9 @@ class MainWindow(QMainWindow):
             QProgressBar { border: none; border-radius: 5px; background: #EDF1F5; text-align: center; color: #68717D; }
             QProgressBar::chunk { background: #087EF4; border-radius: 4px; }
             QSplitter::handle { background: #EEF1F4; width: 7px; }
+            QMenu#recipeQuickMenu { background: #FFFFFF; border: 1px solid #C9D1DB; border-radius: 8px; padding: 0; }
+            QMenu#recipeQuickMenu QTreeWidget { border: 1px solid #E0E4E9; border-radius: 6px; background: #FFFFFF; alternate-background-color: #F8FAFC; }
+            QMenu#recipeQuickMenu QHeaderView::section { background: #F3F5F7; color: #68717D; border: none; border-bottom: 1px solid #E0E4E9; padding: 6px; }
         """)
 
     def _build_ui(self):
@@ -1445,7 +1738,7 @@ class MainWindow(QMainWindow):
         self.title_label = QLabel("对位偏差测量软件")
         self.title_label.setObjectName("titleLabel")
         self.title_label.setMinimumWidth(142)
-        self.version_label = QLabel("V1.5.6")
+        self.version_label = QLabel("V1.5.7")
         self.version_label.setObjectName("versionLabel")
         title_row.addWidget(self.brand_dot_label)
         title_row.addWidget(self.title_label)
@@ -1454,21 +1747,26 @@ class MainWindow(QMainWindow):
 
         self.import_upper_btn = QPushButton("导入上层/单图")
         self.import_lower_btn = QPushButton("导入下层图像")
-        self.load_recipe_btn = QPushButton("加载配方")
+        self.load_recipe_btn = QPushButton("当前配方：未加载  ▾")
+        self.recipe_manage_btn = QPushButton("配方管理")
         self.save_recipe_btn = QPushButton("保存配方")
         self.analyze_all_btn = QPushButton("计算对位偏差")
         self.export_btn = QPushButton("导出结果")
         self.import_upper_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
         self.import_lower_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
-        self.load_recipe_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        self.load_recipe_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        self.recipe_manage_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogListView))
         self.save_recipe_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
         self.analyze_all_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.export_btn.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
         self.analyze_all_btn.setObjectName("primaryButton")
-        self.load_recipe_btn.setObjectName("titleAction")
+        self.load_recipe_btn.setObjectName("recipeSwitcher")
+        self.recipe_manage_btn.setObjectName("titleAction")
         self.save_recipe_btn.setObjectName("titleAction")
+        self.load_recipe_btn.setMinimumWidth(225)
+        self.load_recipe_btn.setMaximumWidth(320)
         toolbar.addLayout(title_row, stretch=1)
-        for btn in (self.load_recipe_btn, self.save_recipe_btn):
+        for btn in (self.load_recipe_btn, self.recipe_manage_btn, self.save_recipe_btn):
             toolbar.addWidget(btn)
         toolbar.addSpacing(10)
         self.minimize_btn = QPushButton("—")
@@ -2232,7 +2530,8 @@ class MainWindow(QMainWindow):
         self.analyze_all_btn.clicked.connect(self.analyze_all_marks)
         self.export_btn.clicked.connect(self.export_result_file)
         self.save_recipe_btn.clicked.connect(self.save_recipe_file)
-        self.load_recipe_btn.clicked.connect(self.load_recipe_file)
+        self.load_recipe_btn.clicked.connect(self.show_recipe_quick_menu)
+        self.recipe_manage_btn.clicked.connect(self.show_recipe_manager)
         self.batch_import_mark1_upper_btn.clicked.connect(lambda: self.import_batch_images("Mark1", "upper"))
         self.batch_import_mark1_lower_btn.clicked.connect(lambda: self.import_batch_images("Mark1", "lower"))
         self.batch_import_mark2_upper_btn.clicked.connect(lambda: self.import_batch_images("Mark2", "upper"))
@@ -2721,6 +3020,15 @@ class MainWindow(QMainWindow):
             recipe_display = self.loaded_recipe_display_name or self.recipe_name_edit.text().strip() or "未加载"
             self.current_recipe_label.setText(f"当前配方：{recipe_display}")
             self.current_recipe_label.setToolTip(f"当前配方：{recipe_display}")
+        if hasattr(self, "load_recipe_btn"):
+            recipe_display = self.loaded_recipe_display_name or self.recipe_name_edit.text().strip() or "未加载"
+            full_text = f"当前配方：{recipe_display}  ▾"
+            self.load_recipe_btn.setText(
+                self.load_recipe_btn.fontMetrics().elidedText(full_text, Qt.ElideMiddle, 290)
+            )
+            self.load_recipe_btn.setToolTip(
+                f"当前配方：{recipe_display}\n点击搜索、切换或从文件导入配方。"
+            )
         if hasattr(self, "workflow_recipe_label"):
             recipe_display = self.loaded_recipe_display_name or self.recipe_name_edit.text().strip() or "未加载"
             self.workflow_recipe_label.setText(f"当前配方：{recipe_display}")
@@ -4125,7 +4433,7 @@ class MainWindow(QMainWindow):
                 self.status_task_dot.setStyleSheet("color: #007AFF;")
                 self.status_task_label.setText("任务状态：正在离线计算")
         for button in (
-            self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn,
+            self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn, self.recipe_manage_btn,
             self.save_recipe_btn, self.analyze_all_btn, self.export_btn,
             self.analyze_roi_btn, self.auto_detect_btn, self.reset_measurement_btn,
         ):
@@ -4270,7 +4578,6 @@ class MainWindow(QMainWindow):
         labels = {
             self.import_upper_btn: "导入上层" if compact else "导入上层/单图",
             self.import_lower_btn: "导入下层" if compact else "导入下层图像",
-            self.load_recipe_btn: "加载配方",
             self.save_recipe_btn: "保存配方",
             self.analyze_all_btn: "计算" if compact else "计算对位偏差",
             self.export_btn: "导出" if compact else "导出结果",
@@ -4383,30 +4690,52 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "导出失败", str(exc))
 
-    def save_recipe_file(self):
-        self._pull_config_from_ui()
-        path, _ = QFileDialog.getSaveFileName(self, "保存配方", "overlay_recipe.json", "JSON (*.json)")
-        if not path:
-            return
-        try:
-            save_recipe(path, self.config, self.params, list(self.marks.values()))
-            self.loaded_recipe_path = path
-            self.loaded_recipe_display_name = self.config.recipe_name.strip() or Path(path).stem
-            QMessageBox.information(self, "保存完成", f"配方已保存：\n{path}")
-        except Exception as exc:
-            QMessageBox.critical(self, "保存失败", str(exc))
+    def _recipe_state_will_be_replaced(self) -> bool:
+        has_roi = any(
+            mark and (mark.upper_roi is not None or mark.lower_roi is not None)
+            for mark in self.marks.values()
+        )
+        return bool(
+            self.loaded_recipe_path
+            or has_roi
+            or self.detections
+            or self.overlays
+            or self.auto_overlays
+            or any(self.batch_overlays.values())
+            or any(self.batch_run_records.values())
+        )
 
-    def load_recipe_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "加载配方", "", "JSON (*.json)")
-        if not path:
-            return
+    def _confirm_recipe_switch(self, path: str) -> bool:
+        if not self._recipe_state_will_be_replaced():
+            return True
+        if self.loaded_recipe_path and Path(self.loaded_recipe_path).resolve() == Path(path).resolve():
+            return True
+        answer = QMessageBox.question(
+            self,
+            "切换配方",
+            "切换后将清除当前 ROI 和测量结果，并载入新配方中的 ROI。\n"
+            "已导入的单次图像和批量图像会保留。\n\n确定继续吗？",
+            QMessageBox.Yes | QMessageBox.Cancel,
+            QMessageBox.Cancel,
+        )
+        return answer == QMessageBox.Yes
+
+    def _load_recipe_from_path(
+        self,
+        path: str,
+        *,
+        confirm_switch: bool = True,
+        show_message: bool = True,
+    ) -> bool:
+        if confirm_switch and not self._confirm_recipe_switch(path):
+            return False
         try:
             config, params, marks = load_recipe(path)
             self.config = config
             if not getattr(self.config, "recipe_name", "").strip():
                 self.config.recipe_name = Path(path).stem
             self.params = params
-            loaded_marks = {m.mark_id: m for m in marks if m.mark_id in {"Mark1", "Mark2"}}
+            loaded_marks = {mark.mark_id: mark for mark in marks if mark.mark_id in {"Mark1", "Mark2"}}
             self.marks = {
                 mark_id: loaded_marks.get(mark_id, MarkRecipe(mark_id))
                 for mark_id in ("Mark1", "Mark2")
@@ -4417,11 +4746,10 @@ class MainWindow(QMainWindow):
                     self.roi_sources[mark_id]["upper"] = "recipe"
                 if mark.lower_roi is not None:
                     self.roi_sources[mark_id]["lower"] = "recipe"
-            self.loaded_recipe_path = path
+            self.loaded_recipe_path = str(Path(path).resolve())
             self.loaded_recipe_display_name = self.config.recipe_name.strip() or Path(path).stem
             self._recipe_roi_confirmation_signature = None
-            # 加载配方只更新产品信息、ROI、算法参数和判定规格，不重置已导入图像。
-            # 这样用户可以先导入图像，再加载同类型物料的配方继续测量。
+            # Recipe changes preserve imported images but invalidate all prior measurements.
             for runtime_mark in ("Mark1", "Mark2"):
                 self._ensure_mark_runtime(runtime_mark)
             self.detections.clear()
@@ -4429,20 +4757,118 @@ class MainWindow(QMainWindow):
             self.auto_detections_by_mark = {"Mark1": {}, "Mark2": {}}
             self.auto_candidates_by_mark = {"Mark1": {}, "Mark2": {}}
             self.auto_selections = {
-                "Mark1": {"reference_label": getattr(self.config, "auto_reference_label", ""), "target_label": getattr(self.config, "auto_target_label", "")},
+                "Mark1": {
+                    "reference_label": getattr(self.config, "auto_reference_label", ""),
+                    "target_label": getattr(self.config, "auto_target_label", ""),
+                },
                 "Mark2": {"reference_label": "", "target_label": ""},
             }
             self.auto_overlays.clear()
             self.batch_overlays = {"Mark1": [], "Mark2": []}
             self.batch_run_records = {"Mark1": [], "Mark2": []}
+            self.recipe_library.mark_used(path)
             self._sync_current_mark_images()
             self._push_config_to_ui()
             self._push_current_auto_match_rules()
             self._refresh_auto_selection_combos()
             self._refresh_all_widgets()
-            QMessageBox.information(self, "加载完成", f"配方已加载：\n{path}")
+            self._append_log(f"已加载配方：{self.loaded_recipe_display_name}")
+            if show_message:
+                QMessageBox.information(self, "加载完成", f"配方已加载：\n{path}")
+            return True
         except Exception as exc:
             QMessageBox.critical(self, "加载失败", str(exc))
+            return False
+
+    def show_recipe_quick_menu(self):
+        if self.recipe_quick_menu is None:
+            self.recipe_quick_menu = RecipeQuickMenu(self)
+            self.recipe_quick_menu.recipeSelected.connect(self._load_recipe_from_path)
+            self.recipe_quick_menu.importRequested.connect(self.import_recipe_file)
+            self.recipe_quick_menu.managerRequested.connect(self.show_recipe_manager)
+            self.recipe_quick_menu.openLibraryRequested.connect(self.open_recipe_library)
+        self.recipe_quick_menu.set_entries(self.recipe_library.scan())
+        position = self.load_recipe_btn.mapToGlobal(QPoint(0, self.load_recipe_btn.height() + 4))
+        self.recipe_quick_menu.popup(position)
+        self.recipe_quick_menu.search_edit.setFocus()
+
+    def open_recipe_library(self):
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.recipe_library.root)))
+
+    def show_recipe_manager(self):
+        dialog = RecipeLibraryDialog(self.recipe_library, self)
+
+        def import_from_manager():
+            dialog.reject()
+            self.import_recipe_file()
+
+        dialog.import_btn.clicked.connect(import_from_manager)
+        if dialog.exec() == QDialog.Accepted and dialog.selected_recipe_path:
+            self._load_recipe_from_path(dialog.selected_recipe_path)
+
+    def import_recipe_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "从文件导入配方", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            load_recipe(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "配方无效", str(exc))
+            return
+
+        choice = QMessageBox(self)
+        choice.setWindowTitle("导入配方")
+        choice.setText("请选择这个配方的使用方式：")
+        choice.setInformativeText(
+            "加入配方库后可从顶部快捷列表中搜索和切换；仅本次加载不会复制原文件。"
+        )
+        add_button = choice.addButton("导入并加入配方库", QMessageBox.AcceptRole)
+        once_button = choice.addButton("仅本次加载", QMessageBox.ActionRole)
+        choice.addButton(QMessageBox.Cancel)
+        choice.exec()
+        clicked = choice.clickedButton()
+        if clicked == add_button:
+            try:
+                managed_path = self.recipe_library.import_recipe(path)
+            except Exception as exc:
+                QMessageBox.critical(self, "导入失败", str(exc))
+                return
+            self._load_recipe_from_path(str(managed_path))
+        elif clicked == once_button:
+            self._load_recipe_from_path(path)
+
+    def load_recipe_file(self):
+        """Backward-compatible entry point for existing integrations and tests."""
+        self.import_recipe_file()
+
+    def save_recipe_file(self):
+        self._pull_config_from_ui()
+        name = self.config.recipe_name.strip() or "overlay_recipe"
+        version = str(getattr(self.config, "recipe_version", "")).strip()
+        default_name = RecipeLibrary._safe_stem(f"{name}_{version}" if version else name) + ".json"
+        status_directory = RecipeLibrary._status_directory(
+            str(getattr(self.config, "recipe_validation_status", ""))
+        )
+        default_path = self.recipe_library.root / status_directory / default_name
+        path, _ = QFileDialog.getSaveFileName(self, "保存配方", str(default_path), "JSON (*.json)")
+        if not path:
+            return
+        try:
+            save_recipe(path, self.config, self.params, list(self.marks.values()))
+            saved_path = Path(path).resolve()
+            try:
+                saved_path.relative_to(self.recipe_library.root)
+                managed_path = saved_path
+            except ValueError:
+                managed_path = self.recipe_library.import_recipe(saved_path)
+            self.loaded_recipe_path = str(managed_path)
+            self.loaded_recipe_display_name = self.config.recipe_name.strip() or managed_path.stem
+            self.recipe_library.mark_used(managed_path)
+            self._refresh_all_widgets()
+            extra = "" if managed_path == saved_path else f"\n快捷配方库副本：\n{managed_path}"
+            QMessageBox.information(self, "保存完成", f"配方已保存：\n{saved_path}{extra}")
+        except Exception as exc:
+            QMessageBox.critical(self, "保存失败", str(exc))
 
 
 def run_app():

@@ -1,5 +1,14 @@
 # Changelog
 
+## V1.5.7
+
+- Added a searchable quick recipe switcher in the frameless title bar, grouped by favorites, recent use, and all recipes.
+- Added a managed local recipe library under the user's local application-data directory with validated, draft, and archived categories.
+- Preserved direct JSON file loading with an explicit choice between one-time loading and importing a managed library copy.
+- Added a recipe manager for filtering recipes, toggling favorites, opening the local library, and configuring an optional company shared recipe directory.
+- Made recipe switching preserve imported single/batch images while replacing old ROIs and clearing stale measurement, auto-detection, and repeatability results after confirmation.
+- Kept existing recipe JSON fields compatible and stored favorites, history, and shared-library settings in a separate library-state file.
+
 ## V1.5.6
 
 - Refined the frameless window against the approved fused measurement-workstation mockup.
