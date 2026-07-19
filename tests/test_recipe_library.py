@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 
 from overlay_measure.models import DetectionParams, ImageData, MarkRecipe, MeasurementConfig, OverlayResult, Roi
 from overlay_measure.recipe_library import RecipeLibrary
+from overlay_measure.recipe_integrity import verify_recipe
 from overlay_measure.recipe_manager import save_recipe
 from overlay_measure.ui_main import MainWindow
 
@@ -68,6 +70,86 @@ def test_recipe_library_discovers_shared_recipes_without_copying(tmp_path):
     assert entries[0].source == "共享"
     assert entries[0].path == shared_recipe
     assert not any(library.validated_dir.glob("*.json"))
+
+
+def test_local_library_migration_preserves_recipes_seals_and_state(tmp_path, monkeypatch):
+    monkeypatch.delenv("OVERLAY_MEASURE_RECIPE_LIBRARY", raising=False)
+    old_root = tmp_path / "old_library"
+    new_root = tmp_path / "new_library"
+    config_path = tmp_path / "settings" / "recipe_library_config.json"
+    source = tmp_path / "external_recipe.json"
+    _save_test_recipe(source, "量产配方", "Validated", "MAT-160")
+    library = RecipeLibrary(old_root, config_path=config_path)
+    managed = library.import_recipe(source)
+    library.toggle_favorite(managed)
+    library.mark_used(managed)
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    library.set_shared_library(shared)
+
+    report = library.change_local_library(new_root, migrate=True)
+
+    assert report.old_root == old_root.resolve()
+    assert report.new_root == new_root.resolve()
+    assert report.copied == 1
+    migrated = next((new_root / "validated").glob("*.json"))
+    assert verify_recipe(migrated)[0] == "Verified"
+    entries = library.scan()
+    local_entry = next(entry for entry in entries if entry.source == "本机")
+    assert local_entry.path == migrated
+    assert local_entry.favorite
+    assert local_entry.last_used
+    assert library.shared_library == shared.resolve()
+
+    reloaded = RecipeLibrary(config_path=config_path)
+    assert reloaded.root == new_root.resolve()
+    assert reloaded.scan()[0].favorite
+
+
+def test_local_library_migration_renames_conflicting_recipe(tmp_path, monkeypatch):
+    monkeypatch.delenv("OVERLAY_MEASURE_RECIPE_LIBRARY", raising=False)
+    old_root = tmp_path / "old_library"
+    new_root = tmp_path / "new_library"
+    config_path = tmp_path / "config.json"
+    source = tmp_path / "source.json"
+    conflict = tmp_path / "conflict.json"
+    _save_test_recipe(source, "同名配方", "Validated", "MAT-A")
+    _save_test_recipe(conflict, "同名配方", "Validated", "MAT-B")
+    library = RecipeLibrary(old_root, config_path=config_path)
+    library.import_recipe(source)
+    target_library = RecipeLibrary(new_root, config_path=tmp_path / "unused.json")
+    target_library.import_recipe(conflict)
+
+    report = library.change_local_library(new_root, migrate=True)
+
+    assert report.renamed == 1
+    assert len(list((new_root / "validated").glob("*.json"))) == 2
+
+
+def test_local_library_migration_rolls_back_on_config_failure(tmp_path, monkeypatch):
+    monkeypatch.delenv("OVERLAY_MEASURE_RECIPE_LIBRARY", raising=False)
+    old_root = tmp_path / "old_library"
+    new_root = tmp_path / "new_library"
+    source = tmp_path / "source.json"
+    _save_test_recipe(source, "回滚配方", "Validated")
+    library = RecipeLibrary(old_root, config_path=tmp_path / "config.json")
+    library.import_recipe(source)
+    monkeypatch.setattr(library, "_save_library_config", lambda _root: (_ for _ in ()).throw(OSError("disk full")))
+
+    with pytest.raises(OSError, match="disk full"):
+        library.change_local_library(new_root, migrate=True)
+
+    assert library.root == old_root.resolve()
+    assert not list((new_root / "validated").glob("*.json"))
+
+
+def test_local_library_rejects_nested_destinations(tmp_path, monkeypatch):
+    monkeypatch.delenv("OVERLAY_MEASURE_RECIPE_LIBRARY", raising=False)
+    old_root = tmp_path / "recipes"
+    library = RecipeLibrary(old_root, config_path=tmp_path / "config.json")
+
+    with pytest.raises(ValueError, match="当前配方库内部"):
+        library.change_local_library(old_root / "nested", migrate=True)
 
 
 def test_recipe_switch_preserves_images_and_replaces_rois_and_results(tmp_path, monkeypatch):

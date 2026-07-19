@@ -1,29 +1,29 @@
 **Design QA**
 
-- Source visual truth: `C:\Users\bingo\.codex\generated_images\019ee4fa-2737-79e3-9919-bd2fffa16076\exec-56929ba4-6da2-4064-bf3b-26284ac3d003.png`
-- Implementation screenshot: `D:\CodingTool\overlay_measure\source\artifacts\v1_6_0_production.png`
-- Viewport: 1500 x 920.
-- State: V1.6.0 frameless workspace in the default production mode before loading images or a recipe.
+- Source visual truth: the established V1.5.7 recipe-manager visual hierarchy and V1.6.0 access-control styling.
+- Implementation screenshot: `D:\CodingTool\overlay_measure\source\artifacts\v1_6_1_recipe-library.png`
+- Viewport: 920 x 560.
+- State: V1.6.1 recipe manager in engineering mode with separate local and shared library controls.
 
 **Comparison Evidence**
 
-- The V1.5.7 recipe switcher hierarchy remains intact while a compact green production-mode selector is added beside the version badge.
-- Production mode disables the ROI and algorithm tabs without hiding their numbered workflow position, so operators can still understand the process while protected settings remain inaccessible.
-- Recipe saving is visibly disabled in production mode; image loading, recipe selection, calculation, export, and operator entry remain available.
-- The restrained white/neutral-blue visual system and the persistent bottom task/progress/algorithm-path row remain stable at 1500 x 920.
-- Pass/fail colors remain reserved for measurement semantics; the production-mode green is limited to the access-state selector.
+- Search, source filtering, recipe columns, and primary load action retain the established recipe-manager hierarchy.
+- Local and shared libraries are displayed as two explicit directory rows instead of mixing storage configuration into the bottom action bar.
+- The local row groups modify, restore-default, and open-directory actions; the shared row groups set and clear actions.
+- Long directory paths can shrink within the dialog and expose their full value through selection and tooltips.
+- The bottom row remains focused on recipe operations: import, favorite, load, and close.
 
 **Interaction Evidence**
 
-- The application starts in production mode; switching to engineering opens a masked password prompt.
-- Wrong credentials keep the application in production mode, while the default initial password unlocks ROI, algorithm, diagnostic, and recipe-edit controls.
-- Calculation preflight rejects unvalidated, unsealed, modified, or incomplete production recipes before starting a worker thread.
-- Calculation disables access-mode switching until the background task completes.
-- Automated regression coverage validates access control, mode locking, recipe integrity, production preflight, and the existing recipe-library behaviors.
+- Engineers can choose migration or switch-only behavior before changing the local directory.
+- Migration reports copied, reused, and conflict-renamed recipes and states explicitly that the original directory is retained.
+- Restoring the default directory follows the same guarded migration workflow.
+- Production mode disables local/shared path changes and recipe import while keeping recipe loading, favorites, and directory viewing available.
+- Automated coverage validates migration, state remapping, SHA256 preservation, conflict handling, rollback, persistence, and production permission locks.
 
 **Findings**
 
 - No actionable P0, P1, or P2 visual differences remain.
-- The production-mode control uses a native combo arrow so the access transition remains discoverable without adding another title-bar button.
+- The dialog remains at the established 920 px width; directory paths yield space to the action buttons and remain available through tooltips.
 
 final result: passed

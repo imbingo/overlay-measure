@@ -1385,6 +1385,10 @@ class RecipeQuickMenu(QMenu):
         self.search_edit.clear()
         self._populate()
 
+    def set_engineering_access(self, enabled: bool) -> None:
+        self.import_btn.setEnabled(enabled)
+        self.import_btn.setToolTip("" if enabled else "生产模式不能导入或发布配方")
+
     @staticmethod
     def _matches(entry: RecipeLibraryEntry, query: str) -> bool:
         haystack = " ".join((entry.name, entry.material_code, entry.version, entry.status, entry.source)).lower()
@@ -1478,9 +1482,10 @@ class RecipeQuickMenu(QMenu):
 
 
 class RecipeLibraryDialog(QDialog):
-    def __init__(self, library: RecipeLibrary, parent=None):
+    def __init__(self, library: RecipeLibrary, parent=None, engineering: bool = True):
         super().__init__(parent)
         self.library = library
+        self.engineering = bool(engineering)
         self.selected_recipe_path = ""
         self.setWindowTitle("配方管理")
         self.resize(920, 560)
@@ -1510,21 +1515,39 @@ class RecipeLibraryDialog(QDialog):
             self.tree.setColumnWidth(column, width)
         root.addWidget(self.tree, 1)
 
-        shared = self.library.shared_library
-        self.shared_label = QLabel(f"共享配方库：{shared if shared else '未配置'}")
+        self.local_label = QLabel()
+        self.local_label.setObjectName("recipeMenuHint")
+        self.local_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.local_label.setMinimumWidth(0)
+        local_row = QHBoxLayout()
+        local_row.addWidget(self.local_label, 1)
+        self.change_local_btn = QPushButton("修改本机目录…")
+        self.restore_local_btn = QPushButton("恢复默认目录")
+        self.open_btn = QPushButton("打开本机目录")
+        local_row.addWidget(self.change_local_btn)
+        local_row.addWidget(self.restore_local_btn)
+        local_row.addWidget(self.open_btn)
+        root.addLayout(local_row)
+
+        self.shared_label = QLabel()
         self.shared_label.setObjectName("recipeMenuHint")
-        root.addWidget(self.shared_label)
+        self.shared_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.shared_label.setMinimumWidth(0)
+        shared_row = QHBoxLayout()
+        shared_row.addWidget(self.shared_label, 1)
+        self.shared_btn = QPushButton("设置共享目录…")
+        self.clear_shared_btn = QPushButton("清除共享目录")
+        shared_row.addWidget(self.shared_btn)
+        shared_row.addWidget(self.clear_shared_btn)
+        root.addLayout(shared_row)
 
         actions = QHBoxLayout()
         self.import_btn = QPushButton("从文件导入…")
         self.favorite_btn = QPushButton("切换收藏")
-        self.shared_btn = QPushButton("设置共享目录…")
-        self.clear_shared_btn = QPushButton("清除共享目录")
-        self.open_btn = QPushButton("打开本机配方库")
         self.load_btn = QPushButton("加载所选配方")
         self.load_btn.setObjectName("primaryButton")
         self.close_btn = QPushButton("关闭")
-        for button in (self.import_btn, self.favorite_btn, self.shared_btn, self.clear_shared_btn, self.open_btn):
+        for button in (self.import_btn, self.favorite_btn):
             actions.addWidget(button)
         actions.addStretch(1)
         actions.addWidget(self.load_btn)
@@ -1534,12 +1557,24 @@ class RecipeLibraryDialog(QDialog):
         self.search_edit.textChanged.connect(self.refresh)
         self.source_combo.currentTextChanged.connect(self.refresh)
         self.favorite_btn.clicked.connect(self._toggle_favorite)
+        self.change_local_btn.clicked.connect(self._choose_local_directory)
+        self.restore_local_btn.clicked.connect(self._restore_default_directory)
         self.shared_btn.clicked.connect(self._choose_shared_directory)
         self.clear_shared_btn.clicked.connect(self._clear_shared_directory)
         self.open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.library.root))))
         self.load_btn.clicked.connect(self._accept_selected)
         self.tree.itemDoubleClicked.connect(lambda *_: self._accept_selected())
         self.close_btn.clicked.connect(self.reject)
+        for button in (
+            self.import_btn,
+            self.change_local_btn,
+            self.restore_local_btn,
+            self.shared_btn,
+            self.clear_shared_btn,
+        ):
+            button.setEnabled(self.engineering)
+            if not self.engineering:
+                button.setToolTip("生产模式下目录配置和配方导入已锁定")
         self.refresh()
 
     def refresh(self) -> None:
@@ -1562,7 +1597,64 @@ class RecipeLibraryDialog(QDialog):
             ])
             item.setData(0, Qt.UserRole, str(entry.path))
             self.tree.addTopLevelItem(item)
+        environment_note = "（环境变量覆盖）" if self.library.environment_override else ""
+        self.local_label.setText(f"本机配方库：{self.library.root}{environment_note}")
         self.shared_label.setText(f"共享配方库：{self.library.shared_library or '未配置'}")
+        self.local_label.setToolTip(str(self.library.root))
+        self.shared_label.setToolTip(str(self.library.shared_library or "未配置"))
+
+    def _change_local_directory(self, path: str) -> None:
+        target = Path(path).expanduser().resolve()
+        if target == self.library.root:
+            QMessageBox.information(self, "目录未变化", "所选目录已经是当前本机配方库。")
+            return
+        if self.library.environment_override:
+            QMessageBox.warning(
+                self,
+                "环境变量覆盖",
+                "当前设置了 OVERLAY_MEASURE_RECIPE_LIBRARY。界面修改本次运行会生效，"
+                "但下次启动仍可能被该环境变量覆盖。",
+            )
+        choice = QMessageBox(self)
+        choice.setWindowTitle("切换本机配方库")
+        choice.setText(f"新目录：\n{target}")
+        choice.setInformativeText(
+            "“复制迁移并切换”会复制配方、SHA256、收藏和最近使用记录，且保留原目录；"
+            "“仅切换”不会复制原目录中的配方。"
+        )
+        migrate_btn = choice.addButton("复制迁移并切换", QMessageBox.AcceptRole)
+        switch_btn = choice.addButton("仅切换目录", QMessageBox.ActionRole)
+        choice.addButton(QMessageBox.Cancel)
+        choice.exec()
+        clicked = choice.clickedButton()
+        if clicked != migrate_btn and clicked != switch_btn:
+            return
+        try:
+            report = self.library.change_local_library(target, migrate=clicked == migrate_btn)
+        except Exception as exc:
+            QMessageBox.critical(self, "切换失败", f"本机配方库没有切换：\n{exc}")
+            return
+        self.refresh()
+        if report.migrated:
+            detail = (
+                f"已复制 {report.copied} 个配方，复用 {report.reused} 个相同配方，"
+                f"重命名 {report.renamed} 个冲突配方。"
+            )
+        else:
+            detail = "未复制原配方。"
+        QMessageBox.information(
+            self,
+            "本机配方库已切换",
+            f"当前目录：\n{report.new_root}\n\n{detail}\n原目录仍保留：\n{report.old_root}",
+        )
+
+    def _choose_local_directory(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "选择新的本机配方库目录", str(self.library.root))
+        if path:
+            self._change_local_directory(path)
+
+    def _restore_default_directory(self) -> None:
+        self._change_local_directory(str(self.library.default_root()))
 
     def _selected_path(self) -> str:
         item = self.tree.currentItem()
@@ -1600,7 +1692,7 @@ class MainWindow(QMainWindow):
             if font_path.exists() and QFontDatabase.addApplicationFont(str(font_path)) >= 0:
                 break
         self.setFont(QFont("Microsoft YaHei UI", 9))
-        self.setWindowTitle("对位偏差测量软件 V1.6.0")
+        self.setWindowTitle("对位偏差测量软件 V1.6.1")
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setMinimumSize(1120, 720)
         self.resize(1500, 920)
@@ -1766,7 +1858,7 @@ class MainWindow(QMainWindow):
         self.title_label = QLabel("对位偏差测量软件")
         self.title_label.setObjectName("titleLabel")
         self.title_label.setMinimumWidth(142)
-        self.version_label = QLabel("V1.6.0")
+        self.version_label = QLabel("V1.6.1")
         self.version_label.setObjectName("versionLabel")
         self.operation_mode_combo = QComboBox()
         self.operation_mode_combo.setObjectName("accessMode")
@@ -5116,6 +5208,7 @@ class MainWindow(QMainWindow):
             self.recipe_quick_menu.managerRequested.connect(self.show_recipe_manager)
             self.recipe_quick_menu.openLibraryRequested.connect(self.open_recipe_library)
         self.recipe_quick_menu.set_entries(self.recipe_library.scan())
+        self.recipe_quick_menu.set_engineering_access(self.operation_mode == "Engineering")
         position = self.load_recipe_btn.mapToGlobal(QPoint(0, self.load_recipe_btn.height() + 4))
         self.recipe_quick_menu.popup(position)
         self.recipe_quick_menu.search_edit.setFocus()
@@ -5124,7 +5217,11 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.recipe_library.root)))
 
     def show_recipe_manager(self):
-        dialog = RecipeLibraryDialog(self.recipe_library, self)
+        dialog = RecipeLibraryDialog(
+            self.recipe_library,
+            self,
+            engineering=self.operation_mode == "Engineering",
+        )
 
         def import_from_manager():
             dialog.reject()
@@ -5135,6 +5232,9 @@ class MainWindow(QMainWindow):
             self._load_recipe_from_path(dialog.selected_recipe_path)
 
     def import_recipe_file(self):
+        if self.operation_mode != "Engineering":
+            QMessageBox.warning(self, "权限不足", "生产模式不能导入或发布配方，请先切换到工程模式。")
+            return
         path, _ = QFileDialog.getOpenFileName(self, "从文件导入配方", "", "JSON (*.json)")
         if not path:
             return

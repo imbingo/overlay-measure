@@ -24,11 +24,11 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     window.show()
     app.processEvents()
 
-    assert "V1.6.0" in window.windowTitle()
+    assert "V1.6.1" in window.windowTitle()
     assert window.windowFlags() & Qt.FramelessWindowHint
     assert window.title_bar.height() == 46
     assert window.command_bar.objectName() == "commandBar"
-    assert window.version_label.text() == "V1.6.0"
+    assert window.version_label.text() == "V1.6.1"
     assert window.operation_mode == "Production"
     assert window.operation_mode_combo.currentData() == "Production"
     assert not window.side_tabs.isTabEnabled(2)

@@ -27,22 +27,67 @@ class RecipeLibraryEntry:
     modified_at: float = 0.0
 
 
+@dataclass(frozen=True)
+class RecipeLibraryMigration:
+    old_root: Path
+    new_root: Path
+    migrated: bool
+    copied: int = 0
+    reused: int = 0
+    renamed: int = 0
+
+
 class RecipeLibrary:
     """Managed local recipe storage with optional read-only shared discovery."""
 
-    def __init__(self, root: Optional[Path] = None):
+    def __init__(self, root: Optional[Path] = None, config_path: Optional[Path] = None):
+        self.config_path = Path(config_path) if config_path is not None else self.default_config_path()
         configured_root = os.environ.get("OVERLAY_MEASURE_RECIPE_LIBRARY", "").strip()
         if root is not None:
             self.root = Path(root)
         elif configured_root:
             self.root = Path(configured_root)
         else:
-            local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
-            base = Path(local_app_data) if local_app_data else Path.home() / ".local" / "share"
-            self.root = base / "OverlayMeasure" / "recipes"
+            configured = self._load_library_config().get("local_library", "").strip()
+            self.root = Path(configured) if configured else self.default_root()
         self.root = self.root.expanduser().resolve()
         self.state_path = self.root / ".library_state.json"
         self._ensure_directories()
+
+    @staticmethod
+    def application_data_root() -> Path:
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        base = Path(local_app_data) if local_app_data else Path.home() / ".local" / "share"
+        return base / "OverlayMeasure"
+
+    @classmethod
+    def default_root(cls) -> Path:
+        return (cls.application_data_root() / "recipes").expanduser().resolve()
+
+    @classmethod
+    def default_config_path(cls) -> Path:
+        return cls.application_data_root() / "recipe_library_config.json"
+
+    @property
+    def environment_override(self) -> str:
+        return os.environ.get("OVERLAY_MEASURE_RECIPE_LIBRARY", "").strip()
+
+    def _load_library_config(self) -> dict:
+        if not self.config_path.exists():
+            return {"local_library": ""}
+        try:
+            data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return {"local_library": ""}
+        return {"local_library": str(data.get("local_library", ""))} if isinstance(data, dict) else {"local_library": ""}
+
+    def _save_library_config(self, root: Path) -> None:
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.config_path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps({"local_library": str(root)}, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        temporary.replace(self.config_path)
 
     @property
     def validated_dir(self) -> Path:
@@ -81,6 +126,155 @@ class RecipeLibrary:
         temporary = self.state_path.with_suffix(".tmp")
         temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
         temporary.replace(self.state_path)
+
+    @staticmethod
+    def _load_state_at(path: Path) -> dict:
+        default = {"favorites": [], "recent": {}, "shared_library": ""}
+        if not path.exists():
+            return default
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return default
+        if not isinstance(data, dict):
+            return default
+        return {
+            "favorites": list(data.get("favorites", [])),
+            "recent": dict(data.get("recent", {})),
+            "shared_library": str(data.get("shared_library", "")),
+        }
+
+    @staticmethod
+    def _write_state_at(path: Path, state: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+
+    @staticmethod
+    def _unique_migration_destination(destination: Path) -> Path:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        candidate = destination.with_name(f"{destination.stem}_migrated_{timestamp}{destination.suffix}")
+        index = 2
+        while candidate.exists():
+            candidate = destination.with_name(
+                f"{destination.stem}_migrated_{timestamp}_{index}{destination.suffix}"
+            )
+            index += 1
+        return candidate
+
+    @classmethod
+    def _remap_state_key(
+        cls,
+        key: str,
+        old_root: Path,
+        new_root: Path,
+        mapping: dict[str, Path],
+    ) -> str:
+        normalized = cls._key(key)
+        if normalized in mapping:
+            return cls._key(mapping[normalized])
+        try:
+            relative = Path(key).expanduser().resolve().relative_to(old_root)
+        except (OSError, ValueError):
+            return normalized
+        return cls._key(mapping.get(normalized, new_root / relative))
+
+    def change_local_library(self, new_root: Path | str, migrate: bool = True) -> RecipeLibraryMigration:
+        target = Path(new_root).expanduser().resolve()
+        old_root = self.root
+        if target == old_root:
+            return RecipeLibraryMigration(old_root, target, migrate)
+        if target.exists() and not target.is_dir():
+            raise ValueError("所选本机配方库路径不是文件夹")
+        if target.is_relative_to(old_root):
+            raise ValueError("新配方库不能位于当前配方库内部")
+        if old_root.is_relative_to(target):
+            raise ValueError("新配方库不能包含当前配方库目录")
+
+        for directory in (target, target / "validated", target / "draft", target / "archived"):
+            directory.mkdir(parents=True, exist_ok=True)
+
+        copied = reused = renamed = 0
+        mapping: dict[str, Path] = {}
+        created_files: list[Path] = []
+        target_state_path = target / ".library_state.json"
+        previous_state = target_state_path.read_bytes() if target_state_path.exists() else None
+        try:
+            if migrate:
+                for category in ("validated", "draft", "archived"):
+                    source_directory = old_root / category
+                    if not source_directory.exists():
+                        continue
+                    for source in source_directory.rglob("*.json"):
+                        relative = source.relative_to(source_directory)
+                        destination = target / category / relative
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        if destination.exists():
+                            if self._same_file_content(source, destination):
+                                reused += 1
+                            else:
+                                destination = self._unique_migration_destination(destination)
+                                renamed += 1
+                        if not destination.exists():
+                            shutil.copy2(source, destination)
+                            created_files.append(destination)
+                            copied += 1
+                        mapping[self._key(source)] = destination
+
+                        source_sidecar = source.with_suffix(source.suffix + ".sha256")
+                        destination_sidecar = destination.with_suffix(destination.suffix + ".sha256")
+                        if source_sidecar.exists() and not destination_sidecar.exists():
+                            shutil.copy2(source_sidecar, destination_sidecar)
+                            created_files.append(destination_sidecar)
+
+                source_state = self._load_state()
+                target_state = self._load_state_at(target_state_path)
+                favorites = set(target_state["favorites"])
+                favorites.update(
+                    self._remap_state_key(key, old_root, target, mapping) for key in source_state["favorites"]
+                )
+                recent = dict(target_state["recent"])
+                for key, used_at in source_state["recent"].items():
+                    remapped = self._remap_state_key(key, old_root, target, mapping)
+                    if str(used_at) > str(recent.get(remapped, "")):
+                        recent[remapped] = used_at
+                target_state = {
+                    "favorites": sorted(favorites),
+                    "recent": recent,
+                    "shared_library": source_state["shared_library"] or target_state["shared_library"],
+                }
+                self._write_state_at(target_state_path, target_state)
+            else:
+                source_state = self._load_state()
+                target_state = self._load_state_at(target_state_path)
+                if source_state["shared_library"] and not target_state["shared_library"]:
+                    target_state["shared_library"] = source_state["shared_library"]
+                    self._write_state_at(target_state_path, target_state)
+
+            self._save_library_config(target)
+        except Exception:
+            for path in reversed(created_files):
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            try:
+                if previous_state is None:
+                    target_state_path.unlink(missing_ok=True)
+                else:
+                    target_state_path.write_bytes(previous_state)
+            except OSError:
+                pass
+            raise
+
+        self.root = target
+        self.state_path = target_state_path
+        self._ensure_directories()
+        return RecipeLibraryMigration(old_root, target, migrate, copied, reused, renamed)
+
+    def restore_default_library(self, migrate: bool = True) -> RecipeLibraryMigration:
+        return self.change_local_library(self.default_root(), migrate=migrate)
 
     @staticmethod
     def _key(path: Path | str) -> str:

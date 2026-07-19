@@ -21,7 +21,8 @@ from overlay_measure.models import (
 from overlay_measure.quality_gate import apply_quality_gate
 from overlay_measure.recipe_integrity import seal_recipe, verify_recipe
 from overlay_measure.traceability import create_measurement_archive
-from overlay_measure.ui_main import MainWindow
+from overlay_measure.recipe_library import RecipeLibrary
+from overlay_measure.ui_main import MainWindow, RecipeLibraryDialog
 from overlay_measure.measurement_engine import run_measurement_job
 
 
@@ -68,6 +69,25 @@ def test_engineering_mode_requires_password(monkeypatch, tmp_path):
     assert window.side_tabs.isTabEnabled(3)
     assert window.change_engineering_password_btn.isEnabled()
     window.close()
+    app.processEvents()
+
+
+def test_recipe_library_settings_are_locked_in_production(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    library = RecipeLibrary(tmp_path / "recipes", config_path=tmp_path / "config.json")
+    production = RecipeLibraryDialog(library, engineering=False)
+    assert not production.import_btn.isEnabled()
+    assert not production.change_local_btn.isEnabled()
+    assert not production.restore_local_btn.isEnabled()
+    assert not production.shared_btn.isEnabled()
+    production.close()
+
+    engineering = RecipeLibraryDialog(library, engineering=True)
+    assert engineering.import_btn.isEnabled()
+    assert engineering.change_local_btn.isEnabled()
+    assert engineering.restore_local_btn.isEnabled()
+    assert engineering.shared_btn.isEnabled()
+    engineering.close()
     app.processEvents()
 
 

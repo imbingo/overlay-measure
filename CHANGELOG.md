@@ -1,5 +1,15 @@
 # Changelog
 
+## V1.6.1
+
+- Added a configurable local recipe-library location in Recipe Manager, separate from the optional shared recipe directory.
+- Added “copy, migrate, and switch”, “switch only”, and “restore default” workflows while retaining the original directory as a safety backup.
+- Migrated recipe JSON files, SHA256 sidecars, favorites, recent-use history, and shared-directory configuration; conflicting recipes are retained under timestamped names.
+- Added rollback behavior so a failed migration does not switch the active library and removes files created by the failed attempt.
+- Persisted the selected local-library path in application settings outside the recipe directory, while retaining the existing environment-variable override.
+- Locked local/shared directory changes and recipe import in production mode to prevent unapproved recipe publication.
+- Added migration, conflict, rollback, persistence, and production-permission regression tests.
+
 ## V1.6.0
 
 - Added production and engineering operation modes. The application starts in production mode; entering engineering mode requires a password, initially `admin123`, and authenticated engineers can change it from the product-information page.
