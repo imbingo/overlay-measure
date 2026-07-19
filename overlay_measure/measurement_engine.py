@@ -5,10 +5,12 @@ from typing import Callable, Dict, Iterable, Optional
 import numpy as np
 
 from .auto_mark_detector import detect_auto_marks_with_report
+from .batch_pairing import validate_batch_pairing
 from .measurement_service import attach_algorithm_path, detect_manual_roi
 from .models import DetectionParams, DetectionResult, ImageData, MarkRecipe, MeasurementConfig, OverlayResult
 from .overlay_calculator import calculate_relative_overlay
 from .production_measurement import refine_candidate
+from .traceability import create_measurement_archive
 
 
 ProgressCallback = Callable[[int, int, str], None]
@@ -130,7 +132,7 @@ def detect_auto_set(
         reference = next(iter(detected[reference_label].values()))
         target = next(iter(detected[target_label].values()))
         overlay = calculate_relative_overlay(mark_id, reference, target, config)
-        if config.recipe_validation_status != "Validated":
+        if config.recipe_validation_status != "Validated" and overlay.result != "Invalid":
             overlay.result = "Trial"
             overlay.warning = "试测/未验证配方，不作正式判定"
     return {
@@ -180,7 +182,7 @@ def _manual_overlay(
         if progress:
             progress(95.0, "正在计算对位偏差")
         overlay = calculate_relative_overlay(mark_id, detections[reference], detections[target], config)
-        if config.recipe_validation_status != "Validated":
+        if config.recipe_validation_status != "Validated" and overlay.result != "Invalid":
             overlay.result = "Trial"
             overlay.warning = "试测/未验证配方，不作正式判定"
     return {
@@ -216,6 +218,10 @@ def _mean_overlay(mark_id: str, overlays: list[OverlayResult], config: Measureme
     return result
 
 
+def _terminal_overlay(mark_id: str, result: str, warning: str) -> OverlayResult:
+    return OverlayResult(mark_id, 0.0, 0.0, 0.0, 0.0, 0.0, result, warning)
+
+
 def run_measurement_job(job: dict, progress: ProgressCallback, cancelled: CancelCallback) -> dict:
     config: MeasurementConfig = job["config"]
     params: DetectionParams = job["params"]
@@ -223,6 +229,10 @@ def run_measurement_job(job: dict, progress: ProgressCallback, cancelled: Cancel
     selections = job.get("selections", {})
     is_auto = config.workflow_mode == "Auto"
     is_batch = bool(job.get("batch"))
+    if is_batch:
+        pairing_errors = validate_batch_pairing(job["batch_images"], config.mode == "Dual Image")
+        if pairing_errors:
+            raise ValueError("批量图像配对检查失败：\n" + "\n".join(pairing_errors))
     total = max(1, sum(_run_count(job, mark_id) for mark_id in ("Mark1", "Mark2")))
     done = 0
     payload = {
@@ -238,13 +248,6 @@ def run_measurement_job(job: dict, progress: ProgressCallback, cancelled: Cancel
     }
     for mark_id in ("Mark1", "Mark2"):
         count = _run_count(job, mark_id)
-        if is_batch and config.mode == "Dual Image":
-            upper_count = len(job["batch_images"][mark_id]["upper"])
-            lower_count = len(job["batch_images"][mark_id]["lower"])
-            if upper_count and not lower_count:
-                payload["skipped"].append(f"{mark_id}：批量模式缺少下层图像")
-            elif upper_count != lower_count:
-                payload["skipped"].append(f"{mark_id}：上层/下层数量不一致，仅计算前 {count} 次")
         for run_index in range(count):
             if cancelled():
                 raise InterruptedError("用户取消计算")
@@ -287,7 +290,7 @@ def run_measurement_job(job: dict, progress: ProgressCallback, cancelled: Cancel
                 if overlay is None:
                     raise ValueError("未选择到两个有效轮廓，未生成对位结果")
                 record["overlay"] = overlay
-                if is_batch:
+                if is_batch and overlay.result != "Invalid":
                     payload["batch_overlays"][mark_id].append(overlay)
                 else:
                     (payload["auto_overlays"] if is_auto else payload["overlays"])[mark_id] = overlay
@@ -296,6 +299,9 @@ def run_measurement_job(job: dict, progress: ProgressCallback, cancelled: Cancel
             except Exception as exc:
                 record["error"] = str(exc)
                 payload["skipped"].append(f"{prefix}：{exc}")
+                if not is_batch:
+                    target = payload["auto_overlays"] if is_auto else payload["overlays"]
+                    target[mark_id] = _terminal_overlay(mark_id, "Error", str(exc))
             if is_batch:
                 payload["batch_records"][mark_id].append(record)
             done += 1
@@ -303,4 +309,35 @@ def run_measurement_job(job: dict, progress: ProgressCallback, cancelled: Cancel
         if is_batch and payload["batch_overlays"][mark_id]:
             target = payload["auto_overlays"] if is_auto else payload["overlays"]
             target[mark_id] = _mean_overlay(mark_id, payload["batch_overlays"][mark_id], config)
+        elif is_batch and payload["batch_records"][mark_id]:
+            target = payload["auto_overlays"] if is_auto else payload["overlays"]
+            invalid = [
+                item["overlay"] for item in payload["batch_records"][mark_id]
+                if item.get("overlay") is not None and item["overlay"].result == "Invalid"
+            ]
+            if invalid:
+                warning = "；".join(dict.fromkeys(item.warning or "识别质量无效" for item in invalid))
+                target[mark_id] = _terminal_overlay(mark_id, "Invalid", warning)
+            else:
+                errors = [item.get("error", "") for item in payload["batch_records"][mark_id] if item.get("error")]
+                target[mark_id] = _terminal_overlay(mark_id, "Error", "；".join(dict.fromkeys(errors)))
+    traceability = job.get("traceability") or {}
+    if traceability:
+        try:
+            progress(total * 100, total * 100, "正在生成追溯档案")
+            result_map = payload["auto_overlays"] if is_auto else payload["overlays"]
+            measurement_id, archive_path = create_measurement_archive(
+                config,
+                params,
+                traceability.get("recipe_path", ""),
+                traceability.get("recipe_hash", ""),
+                traceability.get("input_paths", []),
+                result_map,
+                payload["batch_records"],
+                traceability.get("operation_mode", ""),
+            )
+            payload["measurement_id"] = measurement_id
+            payload["archive_path"] = str(archive_path)
+        except Exception as exc:
+            payload["archive_error"] = str(exc)
     return payload

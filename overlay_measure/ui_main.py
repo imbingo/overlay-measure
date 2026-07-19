@@ -10,7 +10,7 @@ from typing import Dict, Optional
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, QThread, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHeaderView,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -48,6 +49,8 @@ from PySide6.QtWidgets import (
 )
 
 from .auto_mark_detector import detect_auto_marks_with_report
+from .access_control import AccessController
+from .batch_pairing import validate_batch_pairing
 from .export_naming import build_export_filename
 from .image_loader import SUPPORTED_EXTENSIONS, display_to_uint8, load_image
 from .measurement_engine import run_measurement_job
@@ -58,12 +61,21 @@ from .overlay_calculator import calculate_overlay, calculate_relative_overlay
 from .production_measurement import refine_candidate
 from .recipe_manager import load_recipe, save_recipe
 from .recipe_library import RecipeLibrary, RecipeLibraryEntry
+from .recipe_integrity import seal_recipe, verify_recipe
 from .result_exporter import build_detection_rows, export_results
 from .rz_calculator import build_summary_rows
+from .runtime_support import RecoveryStore, build_runtime_logger
 
 
 LAYER_LABELS = {"upper": "上层", "lower": "下层"}
 STEP_TITLES = ["产品与设备信息", "图像导入", "ROI 设置", "算法参数", "结果导出"]
+RESULT_LABELS = {
+    "Pass": "通过",
+    "Fail": "超限",
+    "Invalid": "无效",
+    "Error": "异常",
+    "Trial": "试测",
+}
 
 
 class SidebarComboBox(QComboBox):
@@ -1588,7 +1600,7 @@ class MainWindow(QMainWindow):
             if font_path.exists() and QFontDatabase.addApplicationFont(str(font_path)) >= 0:
                 break
         self.setFont(QFont("Microsoft YaHei UI", 9))
-        self.setWindowTitle("对位偏差测量软件 V1.5.7")
+        self.setWindowTitle("对位偏差测量软件 V1.6.0")
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setMinimumSize(1120, 720)
         self.resize(1500, 920)
@@ -1628,8 +1640,20 @@ class MainWindow(QMainWindow):
         self.roi_sources = self._empty_roi_sources()
         self.loaded_recipe_path = ""
         self.loaded_recipe_display_name = ""
+        self.loaded_recipe_hash = ""
+        self.recipe_integrity_status = "Unsealed"
         self.recipe_library = RecipeLibrary()
         self.recipe_quick_menu: Optional[RecipeQuickMenu] = None
+        self.access_controller = AccessController()
+        self.operation_mode = "Production"
+        self.runtime_logger = build_runtime_logger()
+        self.recovery_store = RecoveryStore()
+        self.last_measurement_id = ""
+        self.last_archive_path = ""
+        self._calculation_timed_out = False
+        self._calculation_timeout_timer = QTimer(self)
+        self._calculation_timeout_timer.setSingleShot(True)
+        self._calculation_timeout_timer.timeout.connect(self._on_calculation_timeout)
         self._recipe_roi_confirmation_signature = None
         self._calculation_thread: Optional[QThread] = None
         self._calculation_worker: Optional[MeasurementWorker] = None
@@ -1640,6 +1664,9 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._connect_actions()
         self._refresh_all_widgets()
+        self._apply_operation_mode()
+        if QApplication.platformName().lower() != "offscreen":
+            QTimer.singleShot(0, self._offer_recovery)
 
     @staticmethod
     def _empty_roi_sources() -> dict:
@@ -1697,6 +1724,7 @@ class MainWindow(QMainWindow):
             QPushButton#titleAction:hover { background: #F2F5F8; }
             QPushButton#recipeSwitcher { background: #F7F9FB; border: 1px solid #DCE2E9; border-radius: 7px; padding: 6px 12px; text-align: left; min-width: 190px; }
             QPushButton#recipeSwitcher:hover { background: #EEF5FC; border-color: #B9D2EB; }
+            QComboBox#accessMode { background: #F1F7F3; color: #248A3D; border: 1px solid #CDE6D4; font-weight: 600; min-width: 94px; }
             QPushButton#zoomButton { min-width: 34px; max-width: 34px; padding: 6px 0; font-size: 16px; }
             QPushButton#windowButton { border: none; border-radius: 0; min-width: 36px; padding: 4px; background: transparent; font-size: 15px; }
             QPushButton#windowButton:hover { background: #EEF1F4; }
@@ -1738,11 +1766,17 @@ class MainWindow(QMainWindow):
         self.title_label = QLabel("对位偏差测量软件")
         self.title_label.setObjectName("titleLabel")
         self.title_label.setMinimumWidth(142)
-        self.version_label = QLabel("V1.5.7")
+        self.version_label = QLabel("V1.6.0")
         self.version_label.setObjectName("versionLabel")
+        self.operation_mode_combo = QComboBox()
+        self.operation_mode_combo.setObjectName("accessMode")
+        self.operation_mode_combo.addItem("生产模式", "Production")
+        self.operation_mode_combo.addItem("工程模式", "Engineering")
+        self.operation_mode_combo.setFixedWidth(112)
         title_row.addWidget(self.brand_dot_label)
         title_row.addWidget(self.title_label)
         title_row.addWidget(self.version_label)
+        title_row.addWidget(self.operation_mode_combo)
         title_row.addStretch(1)
 
         self.import_upper_btn = QPushButton("导入上层/单图")
@@ -2100,6 +2134,7 @@ class MainWindow(QMainWindow):
         self.equipment_model_edit = QLineEdit()
         self.calibration_date_edit = QLineEdit()
         self.operator_name_edit = QLineEdit()
+        self.change_engineering_password_btn = QPushButton("修改工程模式密码")
         form_info.addRow("物料编码", self.material_code_edit)
         form_info.addRow("配方名称", self.recipe_name_edit)
         form_info.addRow("配方版本", self.recipe_version_edit)
@@ -2108,6 +2143,7 @@ class MainWindow(QMainWindow):
         form_info.addRow("测量设备型号", self.equipment_model_edit)
         form_info.addRow("设备校准日期", self.calibration_date_edit)
         form_info.addRow("操作人员", self.operator_name_edit)
+        form_info.addRow(self.change_engineering_password_btn)
         layout.addWidget(group_info)
         hint = QLabel("提示：保存配方会保留执行测量所需的所有配置。相同物料再次测量时，只需加载配方、更新必要的产品/设备信息，然后按流程继续。")
         hint.setWordWrap(True)
@@ -2426,6 +2462,7 @@ class MainWindow(QMainWindow):
         self.residual_limit_spin = SidebarDoubleSpinBox(); self.residual_limit_spin.setRange(0.001, 1000); self.residual_limit_spin.setDecimals(4); self.residual_limit_spin.setSingleStep(0.05); self.residual_limit_spin.setValue(2.0)
         self.min_edge_points_spin = SidebarSpinBox(); self.min_edge_points_spin.setRange(3, 1000000); self.min_edge_points_spin.setValue(60)
         self.polarity_combo = SidebarComboBox(); self.polarity_combo.addItem("自动", "Auto"); self.polarity_combo.addItem("暗到亮", "Dark to Bright"); self.polarity_combo.addItem("亮到暗", "Bright to Dark")
+        self.measurement_timeout_spin = SidebarSpinBox(); self.measurement_timeout_spin.setRange(10, 3600); self.measurement_timeout_spin.setValue(180)
         form.addRow("高斯滤波 Sigma (px)", self.sigma_spin)
         form.addRow("Canny 低阈值", self.canny_low_spin)
         form.addRow("Canny 高阈值", self.canny_high_spin)
@@ -2436,6 +2473,7 @@ class MainWindow(QMainWindow):
         form.addRow("RANSAC剔除阈值 (px)", self.residual_limit_spin)
         form.addRow("最少边缘点数", self.min_edge_points_spin)
         form.addRow("边缘极性", self.polarity_combo)
+        form.addRow("任务超时 (s)", self.measurement_timeout_spin)
         advanced_section.add_widget(group)
         production_group = QGroupBox("自动正式精测 / 质量门槛")
         production_form = QFormLayout(production_group)
@@ -2475,6 +2513,8 @@ class MainWindow(QMainWindow):
         return w
 
     def _connect_actions(self):
+        self.operation_mode_combo.currentIndexChanged.connect(self.on_operation_mode_changed)
+        self.change_engineering_password_btn.clicked.connect(self.change_engineering_password)
         self.import_upper_btn.clicked.connect(self.import_upper_image)
         self.import_lower_btn.clicked.connect(self.import_lower_image)
         self.mode_combo.currentTextChanged.connect(self.on_mode_changed)
@@ -2545,6 +2585,102 @@ class MainWindow(QMainWindow):
             self.algorithm_path_button.clicked.connect(self.show_algorithm_path_dialog)
         self._install_button_feedback()
 
+    def on_operation_mode_changed(self):
+        requested = self.operation_mode_combo.currentData() or "Production"
+        if requested == self.operation_mode:
+            return
+        if requested == "Engineering":
+            password, accepted = QInputDialog.getText(
+                self,
+                "进入工程模式",
+                "请输入工程模式密码：",
+                QLineEdit.Password,
+            )
+            if not accepted or not self.access_controller.verify(password):
+                self.operation_mode_combo.blockSignals(True)
+                self._set_combo_value(self.operation_mode_combo, "Production")
+                self.operation_mode_combo.blockSignals(False)
+                self.runtime_logger.warning("Engineering mode authentication failed")
+                if accepted:
+                    QMessageBox.warning(self, "密码错误", "工程模式密码不正确。")
+                return
+        self.operation_mode = requested
+        self.runtime_logger.info("Operation mode changed to %s", requested)
+        self._apply_operation_mode()
+
+    def change_engineering_password(self):
+        if self.operation_mode != "Engineering":
+            QMessageBox.warning(self, "权限不足", "请先验证密码并切换到工程模式。")
+            return
+        current, accepted = QInputDialog.getText(
+            self, "修改工程模式密码", "请输入当前密码：", QLineEdit.Password
+        )
+        if not accepted:
+            return
+        if not self.access_controller.verify(current):
+            QMessageBox.warning(self, "密码错误", "当前工程模式密码不正确。")
+            return
+        new_password, accepted = QInputDialog.getText(
+            self, "修改工程模式密码", "请输入新密码（至少 6 个字符）：", QLineEdit.Password
+        )
+        if not accepted:
+            return
+        confirmation, accepted = QInputDialog.getText(
+            self, "修改工程模式密码", "请再次输入新密码：", QLineEdit.Password
+        )
+        if not accepted:
+            return
+        if new_password != confirmation:
+            QMessageBox.warning(self, "两次输入不一致", "两次输入的新密码不一致。")
+            return
+        try:
+            self.access_controller.set_password(new_password)
+        except ValueError as exc:
+            QMessageBox.warning(self, "密码无效", str(exc))
+            return
+        self.runtime_logger.info("Engineering mode password changed")
+        QMessageBox.information(self, "修改完成", "工程模式密码已更新。")
+
+    def _set_operation_mode(self, mode: str, *, authenticated: bool = False):
+        if mode == "Engineering" and not authenticated:
+            raise PermissionError("切换工程模式需要身份验证")
+        self.operation_mode = mode
+        self.operation_mode_combo.blockSignals(True)
+        self._set_combo_value(self.operation_mode_combo, mode)
+        self.operation_mode_combo.blockSignals(False)
+        self._apply_operation_mode()
+
+    def _apply_operation_mode(self):
+        if not hasattr(self, "side_tabs"):
+            return
+        engineering = self.operation_mode == "Engineering"
+        self.side_tabs.setTabEnabled(2, engineering)
+        self.side_tabs.setTabEnabled(3, engineering)
+        self.save_recipe_btn.setEnabled(engineering and not self._calculation_running)
+        self.diagnostic_check.setEnabled(engineering)
+        self.change_engineering_password_btn.setEnabled(engineering and not self._calculation_running)
+        for widget in (
+            self.material_code_edit,
+            self.recipe_name_edit,
+            self.recipe_version_edit,
+            self.recipe_status_combo,
+            self.process_name_edit,
+            self.equipment_model_edit,
+            self.calibration_date_edit,
+        ):
+            widget.setEnabled(engineering)
+        if not engineering and self.side_tabs.currentIndex() in {2, 3}:
+            self.side_tabs.setCurrentIndex(1)
+        color = "#2468B2" if engineering else "#248A3D"
+        background = "#EAF3FD" if engineering else "#F1F7F3"
+        self.operation_mode_combo.setStyleSheet(
+            f"color: {color}; background: {background}; font-weight: 600;"
+        )
+        self.operation_mode_combo.setToolTip(
+            "工程模式：允许修改 ROI、算法参数和配方。" if engineering
+            else "生产模式：配方与算法参数已锁定。切换工程模式需要密码。"
+        )
+
     def on_display_enhancement_changed(self, checked: bool):
         self.upper_canvas.set_display_enhancement(checked)
         self.lower_canvas.set_display_enhancement(checked)
@@ -2614,6 +2750,7 @@ class MainWindow(QMainWindow):
         self.params.residual_limit_px = self.residual_limit_spin.value()
         self.params.min_edge_points = self.min_edge_points_spin.value()
         self.params.polarity = self._combo_value(self.polarity_combo)
+        self.params.measurement_timeout_s = self.measurement_timeout_spin.value()
 
     def _push_config_to_ui(self):
         self._set_mode_ui(self.config.mode)
@@ -2661,6 +2798,7 @@ class MainWindow(QMainWindow):
         self.residual_limit_spin.setValue(self.params.residual_limit_px)
         self.min_edge_points_spin.setValue(self.params.min_edge_points)
         self._set_combo_value(self.polarity_combo, self.params.polarity)
+        self.measurement_timeout_spin.setValue(getattr(self.params, "measurement_timeout_s", 180))
         self._set_combo_value(self.auto_reference_combo, getattr(self.config, "auto_reference_label", ""))
         self._set_combo_value(self.auto_target_combo, getattr(self.config, "auto_target_label", ""))
 
@@ -3058,6 +3196,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_refresh_algorithm_path_panel"):
             self._refresh_algorithm_path_panel(current_mark, show_auto)
         self._update_toolbar_density()
+        self._apply_operation_mode()
 
     def _refresh_mark_combo(self):
         self.marks = {
@@ -3137,11 +3276,23 @@ class MainWindow(QMainWindow):
             dy = float(first.get(dy_key, 0.0))
             dxy = float(first.get(dxy_key, 0.0))
             verdict = first.get("判定", "--")
-            color = "#34C759" if verdict == "通过" else ("#FF3B30" if verdict == "不通过" else "#FFCC00")
+            if verdict == "通过":
+                color = "#34C759"
+            elif verdict in {"超限", "不通过", "异常"}:
+                color = "#FF3B30"
+            else:
+                color = "#FFCC00"
             self._set_result_card(self.dx_value_label, self.dx_unit_label, f"{dx:+.3f}", "μm", "#007AFF")
             self._set_result_card(self.dy_value_label, self.dy_unit_label, f"{dy:+.3f}", "μm", "#FF9500")
             self._set_result_card(self.r_value_label, self.r_unit_label, f"{dxy:.3f}", "μm")
-            result_note = "符合规格" if verdict == "通过" else ("请复核" if verdict == "不通过" else "离线分析状态")
+            result_note = {
+                "通过": "符合规格",
+                "超限": "对位结果超出规格",
+                "不通过": "对位结果超出规格",
+                "无效": "识别质量不满足要求",
+                "异常": "计算流程异常",
+                "试测": "未验证配方",
+            }.get(verdict, "离线分析状态")
             self._set_result_card(self.result_value_label, self.result_unit_label, verdict, result_note, color)
             self.result_unit_label.setToolTip(first.get("提示", "") or result_note)
             self._update_summary_typography()
@@ -3366,7 +3517,7 @@ class MainWindow(QMainWindow):
             for c, val in enumerate(row):
                 item = QTableWidgetItem(str(val))
                 row_text = " ".join(str(x) for x in row)
-                if "失败" in row_text or "超限" in row_text or "Fail" in row_text:
+                if any(token in row_text for token in ("失败", "超限", "无效", "异常", "Fail", "Invalid", "Error")):
                     item.setBackground(QColor(255, 199, 206))
                     item.setForeground(QColor(156, 0, 6))
                 table.setItem(r, c, item)
@@ -3497,7 +3648,7 @@ class MainWindow(QMainWindow):
                         "Dx(μm)": overlay.delta_x_um if overlay else None,
                         "Dy(μm)": overlay.delta_y_um if overlay else None,
                         "Dxy(μm)": overlay.overlay_r_um if overlay else None,
-                        "判定": {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result) if overlay else "失败",
+                        "判定": RESULT_LABELS.get(overlay.result, overlay.result) if overlay else "异常",
                         "提示": overlay.warning if overlay else error,
                     })
             else:
@@ -3512,7 +3663,7 @@ class MainWindow(QMainWindow):
                         "Dx(μm)": overlay.delta_x_um,
                         "Dy(μm)": overlay.delta_y_um,
                         "Dxy(μm)": overlay.overlay_r_um,
-                        "判定": {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result),
+                        "判定": RESULT_LABELS.get(overlay.result, overlay.result),
                         "提示": overlay.warning,
                     })
             if overlays:
@@ -4022,7 +4173,7 @@ class MainWindow(QMainWindow):
                         f"{overlay.delta_x_um:+.3f}" if overlay else "-",
                         f"{overlay.delta_y_um:+.3f}" if overlay else "-",
                         f"{overlay.overlay_r_um:.3f}" if overlay else "-",
-                        {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result) if overlay else "失败",
+                        RESULT_LABELS.get(overlay.result, overlay.result) if overlay else "异常",
                         overlay.warning if overlay else record.get("error", ""),
                     ])
             else:
@@ -4033,7 +4184,7 @@ class MainWindow(QMainWindow):
                         f"{overlay.delta_x_um:+.3f}",
                         f"{overlay.delta_y_um:+.3f}",
                         f"{overlay.overlay_r_um:.3f}",
-                        {"Pass": "通过", "Fail": "不通过", "Trial": "试测"}.get(overlay.result, overlay.result),
+                        RESULT_LABELS.get(overlay.result, overlay.result),
                         overlay.warning,
                     ])
             if overlays:
@@ -4178,6 +4329,8 @@ class MainWindow(QMainWindow):
         self.roi_sources = self._empty_roi_sources()
         self.loaded_recipe_path = ""
         self.loaded_recipe_display_name = ""
+        self.loaded_recipe_hash = ""
+        self.recipe_integrity_status = "Unsealed"
         self._recipe_roi_confirmation_signature = None
         self.config.recipe_name = ""
         if hasattr(self, "recipe_name_edit"):
@@ -4419,6 +4572,12 @@ class MainWindow(QMainWindow):
             "selections": deepcopy(self.auto_selections),
             "batch": self._is_batch_mode(),
             "roi_sources": deepcopy(self.roi_sources),
+            "traceability": {
+                "recipe_path": self.loaded_recipe_path,
+                "recipe_hash": self.loaded_recipe_hash,
+                "input_paths": self._all_input_paths(),
+                "operation_mode": self.operation_mode,
+            },
         }
 
     def _set_calculation_running(self, running: bool):
@@ -4436,19 +4595,135 @@ class MainWindow(QMainWindow):
             self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn, self.recipe_manage_btn,
             self.save_recipe_btn, self.analyze_all_btn, self.export_btn,
             self.analyze_roi_btn, self.auto_detect_btn, self.reset_measurement_btn,
+            self.change_engineering_password_btn,
         ):
             button.setEnabled(not running)
+        self.operation_mode_combo.setEnabled(not running)
         self.side_tabs.setEnabled(not running)
+
+    def _production_preflight_errors(self) -> list[str]:
+        errors: list[str] = []
+        if self.operation_mode == "Production":
+            if not self.loaded_recipe_path:
+                errors.append("生产模式必须加载配方")
+            if self.config.recipe_validation_status != "Validated":
+                errors.append("生产模式只能使用已验证配方")
+            if self.recipe_integrity_status != "Verified":
+                errors.append("生产配方尚未签章或哈希未验证")
+            if not self.config.material_code.strip():
+                errors.append("物料编码不能为空")
+            if not self.config.operator_name.strip():
+                errors.append("操作人员不能为空")
+        if self._is_batch_mode():
+            errors.extend(validate_batch_pairing(self.batch_images, self.config.mode == "Dual Image"))
+        return errors
+
+    def _recovery_payload(self) -> dict:
+        return {
+            "recipe_path": self.loaded_recipe_path,
+            "mode": self.config.mode,
+            "batch": self._is_batch_mode(),
+            "mark_images": {
+                mark_id: {
+                    layer: image.path if image else ""
+                    for layer, image in layers.items()
+                }
+                for mark_id, layers in self.mark_images.items()
+            },
+            "batch_images": {
+                mark_id: {
+                    layer: [image.path for image in images]
+                    for layer, images in layers.items()
+                }
+                for mark_id, layers in self.batch_images.items()
+            },
+        }
+
+    def _offer_recovery(self):
+        pending = self.recovery_store.load()
+        if not pending:
+            return
+        answer = QMessageBox.question(
+            self,
+            "恢复未完成任务",
+            f"发现 {pending.get('saved_at', '')} 保存的未完成测量任务。\n是否恢复其配方和图像列表？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer != QMessageBox.Yes:
+            self.recovery_store.clear()
+            return
+        try:
+            recipe_path = pending.get("recipe_path", "")
+            if recipe_path and Path(recipe_path).exists():
+                self._load_recipe_from_path(recipe_path, confirm_switch=False, show_message=False)
+            self._set_mode_ui(pending.get("mode", "Single Image"))
+            self._set_combo_value(self.measurement_run_mode_combo, "Batch" if pending.get("batch") else "Single")
+            for mark_id, layers in pending.get("mark_images", {}).items():
+                for layer, path in layers.items():
+                    if path and Path(path).exists():
+                        self._set_image_for_layer(mark_id, layer, load_image(path), "single")
+            for mark_id, layers in pending.get("batch_images", {}).items():
+                for layer, paths in layers.items():
+                    images = [load_image(path) for path in paths if path and Path(path).exists()]
+                    self._append_batch_image_data(mark_id, layer, images)
+            self._sync_current_mark_images()
+            self._refresh_all_widgets()
+            self._append_log("已恢复上次未完成任务的配方和图像列表。")
+        except Exception as exc:
+            self.runtime_logger.exception("Recovery failed")
+            QMessageBox.warning(self, "恢复失败", str(exc))
+        finally:
+            self.recovery_store.clear()
+
+    def _all_input_paths(self) -> list[str]:
+        paths: list[str] = []
+        for layers in self.mark_images.values():
+            paths.extend(image.path for image in layers.values() if image and image.path)
+        for layers in self.batch_images.values():
+            for images in layers.values():
+                paths.extend(image.path for image in images if image.path)
+        return list(dict.fromkeys(paths))
+
+    def _archive_completed_measurement(self, payload: dict):
+        self.last_measurement_id = str(payload.get("measurement_id", ""))
+        self.last_archive_path = str(payload.get("archive_path", ""))
+        if not self.last_archive_path:
+            return
+        archive_path = Path(self.last_archive_path)
+        self.grab().save(str(archive_path / "measurement_screen.png"))
+        self.runtime_logger.info("Measurement archived: %s at %s", self.last_measurement_id, archive_path)
+
+    @Slot()
+    def _on_calculation_timeout(self):
+        if not self._calculation_running:
+            return
+        self._calculation_timed_out = True
+        self.runtime_logger.error("Measurement timeout after %s seconds", self.params.measurement_timeout_s)
+        if self._calculation_worker is not None:
+            self._calculation_worker.cancel()
+        self.cancel_progress_btn.setEnabled(False)
+        self.progress_stage_label.setText("当前阶段：任务超时，正在停止当前算法步骤")
 
     def _start_measurement_job(self):
         if self._calculation_running:
             return
         self._pull_config_from_ui()
+        preflight_errors = self._production_preflight_errors()
+        if preflight_errors:
+            QMessageBox.warning(self, "计算前检查未通过", "请先处理以下问题：\n\n" + "\n".join(f"• {item}" for item in preflight_errors))
+            self.runtime_logger.warning("Measurement preflight rejected: %s", " | ".join(preflight_errors))
+            return
         if not self._confirm_recipe_rois():
             self._append_log("已取消计算；配方 ROI 未确认。")
             return
         job = self._calculation_job_snapshot()
+        self.recovery_store.save(self._recovery_payload())
+        self._calculation_timed_out = False
+        self.last_measurement_id = ""
+        self.last_archive_path = ""
         self._set_calculation_running(True)
+        self._calculation_timeout_timer.start(max(10, int(self.params.measurement_timeout_s)) * 1000)
         self.progress_stage_label.setText("当前阶段：正在准备后台计算")
         self._append_log(
             "计算路径：全图自动识别（不使用 ROI）"
@@ -4501,16 +4776,32 @@ class MainWindow(QMainWindow):
         self.batch_run_records = payload.get("batch_records", {"Mark1": [], "Mark2": []})
         self._refresh_auto_selection_combos()
         self._refresh_all_widgets()
+        try:
+            self._archive_completed_measurement(payload)
+        except Exception:
+            self.runtime_logger.exception("Measurement archive failed")
+            QMessageBox.warning(self, "追溯归档失败", "测量已完成，但自动追溯归档失败。请查看运行日志。")
+        if payload.get("archive_error"):
+            self.runtime_logger.error("Measurement archive failed: %s", payload["archive_error"])
+            QMessageBox.warning(
+                self,
+                "追溯归档失败",
+                f"测量已完成，但自动追溯归档失败：\n{payload['archive_error']}\n\n请查看运行日志。",
+            )
+        self.recovery_store.clear()
         if payload.get("batch") and hasattr(self, "result_tabs"):
             self.result_tabs.setCurrentIndex(2)
         result_map = self.auto_overlays if self._is_auto_workflow() else self.overlays
         lines = [
-            f"{mark_id}: Dx={item.delta_x_um:+.3f} μm，Dy={item.delta_y_um:+.3f} μm，Dxy={item.overlay_r_um:.3f} μm"
+            f"{mark_id}: Dx={item.delta_x_um:+.3f} μm，Dy={item.delta_y_um:+.3f} μm，"
+            f"Dxy={item.overlay_r_um:.3f} μm，判定={RESULT_LABELS.get(item.result, item.result)}"
             for mark_id, item in result_map.items()
         ]
         notes = list(payload.get("warnings", [])) + list(payload.get("skipped", []))
         if lines:
             message = "计算完成：\n" + "\n".join(lines)
+            if self.last_measurement_id:
+                message += f"\n\n测量编号：{self.last_measurement_id}"
             if notes:
                 message += "\n\n提示：\n" + "\n".join(notes)
             QMessageBox.information(self, "计算完成", message)
@@ -4519,14 +4810,24 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_calculation_failed(self, message: str):
+        self._calculation_timeout_timer.stop()
+        self.recovery_store.clear()
+        self.runtime_logger.error("Measurement failed: %s", message)
         QMessageBox.critical(self, "计算失败", self._friendly_error(Exception(message)))
 
     @Slot()
     def _on_calculation_cancelled(self):
-        self._append_log("计算已取消。")
+        self._calculation_timeout_timer.stop()
+        self.recovery_store.clear()
+        if self._calculation_timed_out:
+            QMessageBox.critical(self, "计算超时", "计算已超过设置的任务超时时间并停止。")
+            self._append_log("计算超时并已停止。")
+        else:
+            self._append_log("计算已取消。")
 
     @Slot()
     def _on_calculation_thread_finished(self):
+        self._calculation_timeout_timer.stop()
         self._calculation_worker = None
         self._calculation_thread = None
         self._set_calculation_running(False)
@@ -4685,6 +4986,12 @@ class MainWindow(QMainWindow):
                     summary_rows=self._build_summary_rows(),
                     mark_images=mark_images,
                     repeatability_rows=self._build_repeatability_export_rows(),
+                    traceability_info={
+                        "measurement_id": self.last_measurement_id,
+                        "operation_mode": "生产模式" if self.operation_mode == "Production" else "工程模式",
+                        "recipe_hash": self.loaded_recipe_hash,
+                        "archive_path": self.last_archive_path,
+                    },
                 )
             QMessageBox.information(self, "导出完成", f"结果已导出：\n{path}")
         except Exception as exc:
@@ -4727,6 +5034,20 @@ class MainWindow(QMainWindow):
         confirm_switch: bool = True,
         show_message: bool = True,
     ) -> bool:
+        try:
+            integrity_status, recipe_hash = verify_recipe(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "配方校验失败", str(exc))
+            return False
+        if integrity_status == "Mismatch":
+            self.runtime_logger.error("Recipe integrity mismatch: %s", path)
+            QMessageBox.critical(
+                self,
+                "配方完整性异常",
+                "配方内容与已保存的哈希不一致，已阻止加载。\n"
+                "请由工程人员核对配方文件或重新发布配方。",
+            )
+            return False
         if confirm_switch and not self._confirm_recipe_switch(path):
             return False
         try:
@@ -4748,6 +5069,8 @@ class MainWindow(QMainWindow):
                     self.roi_sources[mark_id]["lower"] = "recipe"
             self.loaded_recipe_path = str(Path(path).resolve())
             self.loaded_recipe_display_name = self.config.recipe_name.strip() or Path(path).stem
+            self.loaded_recipe_hash = recipe_hash
+            self.recipe_integrity_status = integrity_status
             self._recipe_roi_confirmation_signature = None
             # Recipe changes preserve imported images but invalidate all prior measurements.
             for runtime_mark in ("Mark1", "Mark2"):
@@ -4772,9 +5095,14 @@ class MainWindow(QMainWindow):
             self._push_current_auto_match_rules()
             self._refresh_auto_selection_combos()
             self._refresh_all_widgets()
-            self._append_log(f"已加载配方：{self.loaded_recipe_display_name}")
+            integrity_text = "哈希已验证" if integrity_status == "Verified" else "未签章"
+            self._append_log(f"已加载配方：{self.loaded_recipe_display_name}（{integrity_text}）")
             if show_message:
-                QMessageBox.information(self, "加载完成", f"配方已加载：\n{path}")
+                QMessageBox.information(
+                    self,
+                    "加载完成",
+                    f"配方已加载：\n{path}\n\n完整性：{integrity_text}\nSHA256：{recipe_hash}",
+                )
             return True
         except Exception as exc:
             QMessageBox.critical(self, "加载失败", str(exc))
@@ -4842,6 +5170,9 @@ class MainWindow(QMainWindow):
         self.import_recipe_file()
 
     def save_recipe_file(self):
+        if self.operation_mode != "Engineering":
+            QMessageBox.warning(self, "权限不足", "生产模式不能保存或修改配方，请先验证密码并切换到工程模式。")
+            return
         self._pull_config_from_ui()
         name = self.config.recipe_name.strip() or "overlay_recipe"
         version = str(getattr(self.config, "recipe_version", "")).strip()
@@ -4855,6 +5186,7 @@ class MainWindow(QMainWindow):
             return
         try:
             save_recipe(path, self.config, self.params, list(self.marks.values()))
+            saved_hash = seal_recipe(path)
             saved_path = Path(path).resolve()
             try:
                 saved_path.relative_to(self.recipe_library.root)
@@ -4863,6 +5195,8 @@ class MainWindow(QMainWindow):
                 managed_path = self.recipe_library.import_recipe(saved_path)
             self.loaded_recipe_path = str(managed_path)
             self.loaded_recipe_display_name = self.config.recipe_name.strip() or managed_path.stem
+            self.loaded_recipe_hash = saved_hash if managed_path == saved_path else seal_recipe(managed_path)
+            self.recipe_integrity_status = "Verified"
             self.recipe_library.mark_used(managed_path)
             self._refresh_all_widgets()
             extra = "" if managed_path == saved_path else f"\n快捷配方库副本：\n{managed_path}"

@@ -14,6 +14,7 @@ outputs/
 export/
 exports/
 design_qa/
+artifacts/
 
 # Generated measurement outputs and saved production recipes
 *_result.xlsx

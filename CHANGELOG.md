@@ -1,5 +1,17 @@
 # Changelog
 
+## V1.6.0
+
+- Added production and engineering operation modes. The application starts in production mode; entering engineering mode requires a password, initially `admin123`, and authenticated engineers can change it from the product-information page.
+- Locked ROI editing, algorithm parameters, diagnostic controls, product configuration, and recipe saving in production mode.
+- Added SHA256 recipe sidecars and blocked production calculations when a recipe is unsealed, modified, unvalidated, or missing required production metadata.
+- Added explicit `Pass`, `Fail`, `Invalid`, and `Error` result states so specification failures are no longer conflated with recognition failures or runtime exceptions.
+- Added batch image pairing checks for missing layers, count mismatches, and accidental use of the same file as both upper and lower images.
+- Added automatic measurement archives containing software version, operation mode, recipe hash, parameter snapshots, input-file hashes, per-run results, and a UI screenshot.
+- Added rotating runtime logs, unfinished-task recovery, configurable calculation timeout, and cooperative cancellation.
+- Added measurement ID, operation mode, recipe hash, and archive path to exported Excel traceability information.
+- Added focused regression coverage for access control, recipe integrity, quality verdicts, batch pairing, traceability archives, and production preflight checks.
+
 ## V1.5.7
 
 - Added a searchable quick recipe switcher in the frameless title bar, grouped by favorites, recent use, and all recipes.

@@ -119,9 +119,19 @@ def test_export_repeatability_sheet_and_mark_image_aspect_ratio(tmp_path):
             {"Mark": "Mark1", "次数": "统计", "Dx(μm)": 1.1, "PV-Dx(μm)": 0.2},
         ],
         mark_images=[{"mark_id": "Mark1", "layer": "上层", "path": str(image_path), "note": ""}],
+        traceability_info={
+            "measurement_id": "M-TEST-001",
+            "operation_mode": "生产模式",
+            "recipe_hash": "ABC123",
+            "archive_path": "D:/records/M-TEST-001",
+        },
     )
 
     wb = load_workbook(out_path)
     assert "多次测量结果" in wb.sheetnames
     assert len(wb["Mark图片"]._images) == 1
     assert resize_dimensions_preserving_aspect(400, 100, 260, 180) == (260, 65)
+    info = {row[0]: row[1] for row in wb["基础信息"].iter_rows(min_row=2, values_only=True)}
+    assert info["测量记录编号"] == "M-TEST-001"
+    assert info["运行模式"] == "生产模式"
+    assert info["配方SHA256"] == "ABC123"

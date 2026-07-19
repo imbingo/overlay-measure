@@ -4,6 +4,7 @@ import math
 from typing import Dict, Optional
 
 from .models import DetectionResult, MeasurementConfig, OverlayResult
+from .quality_gate import apply_quality_gate
 
 
 def _angle_compensation_um(config: MeasurementConfig) -> tuple[float, float]:
@@ -49,13 +50,8 @@ def calculate_overlay(mark_id: str, upper: DetectionResult, lower: DetectionResu
         warnings.append("ΔY 超限")
     if r_um > config.overlay_r_limit_um:
         warnings.append("R 超限")
-    if upper.warning:
-        warnings.append(f"上层: {upper.warning}")
-    if lower.warning:
-        warnings.append(f"下层: {lower.warning}")
-
     result = "Fail" if warnings else "Pass"
-    return OverlayResult(
+    overlay = OverlayResult(
         mark_id=mark_id,
         delta_x_px=delta_x_px,
         delta_y_px=delta_y_px,
@@ -65,6 +61,7 @@ def calculate_overlay(mark_id: str, upper: DetectionResult, lower: DetectionResu
         result=result,
         warning="; ".join(warnings),
     )
+    return apply_quality_gate(overlay, (upper, lower), config)
 
 
 def calculate_relative_overlay(
@@ -103,7 +100,7 @@ def calculate_relative_overlay(
         warnings.append("Dy 超限")
     if distance_um > config.overlay_r_limit_um:
         warnings.append("Dxy 超限")
-    return OverlayResult(
+    overlay = OverlayResult(
         mark_id=mark_id,
         delta_x_px=delta_x_px,
         delta_y_px=delta_y_px,
@@ -113,3 +110,4 @@ def calculate_relative_overlay(
         result="Fail" if warnings else "Pass",
         warning="；".join(warnings),
     )
+    return apply_quality_gate(overlay, (reference, target), config)

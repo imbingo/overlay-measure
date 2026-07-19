@@ -175,6 +175,7 @@ class DetectionParams:
     diameter_min_um: float = 0.0
     diameter_max_um: float = 999999.0
     polarity: str = "Auto"
+    measurement_timeout_s: int = 180
 
 
 @dataclass

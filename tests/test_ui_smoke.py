@@ -24,11 +24,16 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     window.show()
     app.processEvents()
 
-    assert "V1.5.7" in window.windowTitle()
+    assert "V1.6.0" in window.windowTitle()
     assert window.windowFlags() & Qt.FramelessWindowHint
     assert window.title_bar.height() == 46
     assert window.command_bar.objectName() == "commandBar"
-    assert window.version_label.text() == "V1.5.7"
+    assert window.version_label.text() == "V1.6.0"
+    assert window.operation_mode == "Production"
+    assert window.operation_mode_combo.currentData() == "Production"
+    assert not window.side_tabs.isTabEnabled(2)
+    assert not window.side_tabs.isTabEnabled(3)
+    assert not window.change_engineering_password_btn.isEnabled()
     assert window.recipe_manage_btn.text() == "配方管理"
     assert window.load_recipe_btn.text().startswith("当前配方：未加载")
     window.show_recipe_quick_menu()
@@ -71,6 +76,7 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
 def test_background_calculation_keeps_qt_event_loop_responsive(monkeypatch):
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
+    window._set_operation_mode("Engineering", authenticated=True)
     config, params, marks = load_recipe(str(SAMPLE_DIR / "demo_recipe.json"))
     config.workflow_mode = "Manual"
     window.config = config

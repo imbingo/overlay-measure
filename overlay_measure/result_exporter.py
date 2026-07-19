@@ -74,7 +74,13 @@ def _layer_cn(layer: str) -> str:
 
 
 def _result_cn(result: str) -> str:
-    return {"Pass": "通过", "Fail": "不通过", "Trial": "试测/不判定"}.get(result, result)
+    return {
+        "Pass": "通过",
+        "Fail": "超限",
+        "Invalid": "无效",
+        "Error": "异常",
+        "Trial": "试测/不判定",
+    }.get(result, result)
 
 
 def _fit_cn(mode: str) -> str:
@@ -218,7 +224,7 @@ def _style_sheet(ws, fail_columns: Optional[List[str]] = None):
             cell.alignment = Alignment(vertical="center")
         for idx in fail_indexes:
             value = row[idx - 1].value
-            if value in {"失败", "NG"} or (isinstance(value, str) and "超限" in value):
+            if value in {"失败", "异常", "无效", "NG"} or (isinstance(value, str) and "超限" in value):
                 row[idx - 1].fill = fail_fill
                 row[idx - 1].font = fail_font
     _autosize(ws)
@@ -236,6 +242,7 @@ def export_results(
     summary_rows: Optional[List[dict]] = None,
     mark_images: Optional[List[dict]] = None,
     repeatability_rows: Optional[List[dict]] = None,
+    traceability_info: Optional[dict] = None,
 ) -> None:
     detail_df = pd.DataFrame(rows).rename(columns=DETAIL_COLUMNS)
     summary_df = pd.DataFrame(summary_rows or [])
@@ -278,6 +285,13 @@ def export_results(
             {"项目": "Rz单位", "内容": "μrad"},
             {"项目": "Mark间距L(μm)", "内容": config.rz_distance_l_um},
         ]
+    if traceability_info:
+        info_rows.extend([
+            {"项目": "测量记录编号", "内容": traceability_info.get("measurement_id", "")},
+            {"项目": "运行模式", "内容": traceability_info.get("operation_mode", "")},
+            {"项目": "配方SHA256", "内容": traceability_info.get("recipe_hash", "")},
+            {"项目": "追溯档案路径", "内容": traceability_info.get("archive_path", "")},
+        ])
     info_df = pd.DataFrame(info_rows).round(3)
 
     with TemporaryDirectory() as tmp_dir:

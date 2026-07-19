@@ -181,7 +181,7 @@ def test_repeatability_export_keeps_failed_runs_and_statistics():
     ]
     rows = window._build_repeatability_export_rows()
     assert rows[0]["判定"] == "通过"
-    assert rows[1]["判定"] == "失败"
+    assert rows[1]["判定"] == "异常"
     assert rows[1]["提示"] == "边缘点不足"
     assert rows[2]["次数"] == "统计"
     window.close()

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from .recipe_manager import load_recipe
+from .recipe_integrity import seal_recipe
 
 
 @dataclass(frozen=True)
@@ -127,13 +128,16 @@ class RecipeLibrary:
         stem = self._safe_stem(f"{name}_{version}" if version else name)
         destination = destination_dir / f"{stem}.json"
         if destination == source:
+            seal_recipe(destination)
             return destination
         if destination.exists():
             if self._same_file_content(source, destination):
+                seal_recipe(destination)
                 return destination
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             destination = destination_dir / f"{stem}_{timestamp}.json"
         shutil.copy2(source, destination)
+        seal_recipe(destination)
         return destination
 
     def mark_used(self, path: Path | str) -> None:

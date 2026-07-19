@@ -29,13 +29,28 @@ def build_summary_rows(
             warnings.append(f"Dxy{idx}超限")
         if o.warning and not trial:
             warnings.append(o.warning)
+        if o.result == "Invalid":
+            verdict = "无效"
+            hint = o.warning or "识别质量不满足量测要求"
+        elif o.result == "Error":
+            verdict = "异常"
+            hint = o.warning or "计算异常"
+        elif trial:
+            verdict = "试测"
+            hint = "未验证配方，不作正式判定"
+        elif warnings:
+            verdict = "超限"
+            hint = "；".join(warnings)
+        else:
+            verdict = "通过"
+            hint = ""
         rows.append({
             "项目": mark_id,
             f"Dx{idx}(μm)": dx,
             f"Dy{idx}(μm)": dy,
             f"Dxy{idx}(μm)": dxy,
-            "判定": "试测" if trial else ("不通过" if warnings else "通过"),
-            "提示": "未验证配方，不作正式判定" if trial else "；".join(warnings),
+            "判定": verdict,
+            "提示": hint,
         })
 
     if "Mark1" in deltas and "Mark2" in deltas:
