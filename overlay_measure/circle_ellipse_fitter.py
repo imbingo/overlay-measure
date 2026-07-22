@@ -54,6 +54,100 @@ def fit_circle_least_squares(points: np.ndarray) -> Tuple[float, float, float, f
     return float(cx), float(cy), float(r), residual
 
 
+def fit_circle_geometric_robust(
+    points: np.ndarray,
+    initial: Optional[Tuple[float, float, float]] = None,
+    max_iterations: int = 30,
+) -> Tuple[float, float, float, float]:
+    """Refine a circle by robust orthogonal-distance least squares.
+
+    The algebraic solution is useful as an initializer, but it can move toward a
+    densely sampled or incomplete arc. This IRLS refinement minimizes actual
+    radial distance and limits the influence of local burrs and weak edge picks.
+    """
+    pts = np.asarray(points, dtype=np.float64)
+    if len(pts) < 3:
+        raise ValueError("圆拟合至少需要 3 个点")
+    if initial is None:
+        cx, cy, radius, _ = fit_circle_least_squares(pts)
+    else:
+        cx, cy, radius = (float(value) for value in initial)
+
+    for _ in range(max(1, int(max_iterations))):
+        dx = pts[:, 0] - cx
+        dy = pts[:, 1] - cy
+        distances = np.hypot(dx, dy)
+        valid = distances > 1e-9
+        if int(np.sum(valid)) < 3:
+            break
+        residuals = distances - radius
+        median = float(np.median(residuals[valid]))
+        mad = float(np.median(np.abs(residuals[valid] - median)))
+        scale = max(0.05, 1.4826 * mad)
+        normalized = np.abs(residuals) / (1.5 * scale)
+        weights = np.ones_like(normalized)
+        outliers = normalized > 1.0
+        weights[outliers] = 1.0 / np.maximum(normalized[outliers], 1e-12)
+
+        jacobian = np.column_stack(
+            [
+                -dx / np.maximum(distances, 1e-12),
+                -dy / np.maximum(distances, 1e-12),
+                -np.ones(len(pts), dtype=np.float64),
+            ]
+        )
+        sqrt_weights = np.sqrt(weights)
+        lhs = jacobian * sqrt_weights[:, None]
+        rhs = -residuals * sqrt_weights
+        delta, *_ = np.linalg.lstsq(lhs, rhs, rcond=None)
+        cx += float(delta[0])
+        cy += float(delta[1])
+        radius += float(delta[2])
+        radius = max(radius, 1e-9)
+        if float(np.linalg.norm(delta)) < 1e-7:
+            break
+
+    distances = np.hypot(pts[:, 0] - cx, pts[:, 1] - cy)
+    residual = float(np.sqrt(np.mean(np.square(distances - radius))))
+    return float(cx), float(cy), float(radius), residual
+
+
+def circle_diameter_statistics(
+    points: np.ndarray,
+    center_x: float,
+    center_y: float,
+) -> Dict[str, float]:
+    """Return representative and maximum-Feret diameter statistics."""
+    pts = np.asarray(points, dtype=np.float64)
+    if len(pts) == 0:
+        return {
+            "average_radius_px": 0.0,
+            "average_diameter_px": 0.0,
+            "maximum_diameter_px": 0.0,
+            "minimum_diameter_px": 0.0,
+            "diameter_pv_px": 0.0,
+        }
+    radii = np.hypot(pts[:, 0] - float(center_x), pts[:, 1] - float(center_y))
+    average_diameter = 2.0 * float(np.mean(radii))
+    minimum_diameter = 2.0 * float(np.min(radii))
+
+    hull = cv2.convexHull(pts.astype(np.float32).reshape(-1, 1, 2)).reshape(-1, 2).astype(np.float64)
+    maximum_diameter = 0.0
+    for index in range(len(hull)):
+        distances = np.hypot(hull[index + 1 :, 0] - hull[index, 0], hull[index + 1 :, 1] - hull[index, 1])
+        if len(distances):
+            maximum_diameter = max(maximum_diameter, float(np.max(distances)))
+    if len(hull) == 1:
+        maximum_diameter = 0.0
+    return {
+        "average_radius_px": float(np.mean(radii)),
+        "average_diameter_px": average_diameter,
+        "maximum_diameter_px": maximum_diameter,
+        "minimum_diameter_px": minimum_diameter,
+        "diameter_pv_px": max(0.0, maximum_diameter - minimum_diameter),
+    }
+
+
 def fit_circle_ransac(points: np.ndarray, residual_limit_px: float, iterations: int = 250) -> Tuple[float, float, float, float, np.ndarray]:
     n = len(points)
     if n < 3:
@@ -63,7 +157,10 @@ def fit_circle_ransac(points: np.ndarray, residual_limit_px: float, iterations: 
     best_score = -1
     best_residual = float("inf")
 
-    thresh = max(0.15, float(residual_limit_px) * 2.5)
+    # The UI labels this value as the rejection threshold, so use it directly.
+    # Earlier versions silently multiplied it by 2.5, allowing mixed inner and
+    # outer edges to survive as one circle.
+    thresh = max(0.10, float(residual_limit_px))
     for _ in range(iterations):
         idx = rng.choice(n, 3, replace=False)
         circle = _circle_from_3pts(points[idx[0]], points[idx[1]], points[idx[2]])
@@ -82,7 +179,11 @@ def fit_circle_ransac(points: np.ndarray, residual_limit_px: float, iterations: 
 
     if int(np.sum(best_mask)) < max(3, min(20, int(0.2 * n))):
         best_mask = np.ones(n, dtype=bool)
-    cx, cy, r, residual = fit_circle_least_squares(points[best_mask])
+    initial_cx, initial_cy, initial_r, _ = fit_circle_least_squares(points[best_mask])
+    cx, cy, r, residual = fit_circle_geometric_robust(
+        points[best_mask],
+        (initial_cx, initial_cy, initial_r),
+    )
     return cx, cy, r, residual, best_mask
 
 
@@ -320,8 +421,14 @@ def fit_mark_shape(points: np.ndarray, params: DetectionParams) -> FitResult:
             if params.use_ransac:
                 cx, cy, r, residual, mask = fit_circle_ransac(points, params.residual_limit_px)
             else:
-                cx, cy, r, residual = fit_circle_least_squares(points)
+                initial_cx, initial_cy, initial_r, _ = fit_circle_least_squares(points)
+                cx, cy, r, residual = fit_circle_geometric_robust(
+                    points,
+                    (initial_cx, initial_cy, initial_r),
+                )
                 mask = np.ones(len(points), dtype=bool)
+            statistics = circle_diameter_statistics(points[mask], cx, cy)
+            r = statistics["average_radius_px"] or r
             roundness = 1.0
             conf = _confidence(int(np.sum(mask)), residual, roundness)
             circle_result = FitResult(
@@ -331,7 +438,15 @@ def fit_mark_shape(points: np.ndarray, params: DetectionParams) -> FitResult:
                 residual_px=residual,
                 mode="Circle",
                 confidence=conf,
-                shape_params={"radius_px": float(r), "roundness": 1.0},
+                shape_params={
+                    "radius_px": float(r),
+                    "roundness": 1.0,
+                    "average_diameter_px": statistics["average_diameter_px"],
+                    "maximum_diameter_px": statistics["maximum_diameter_px"],
+                    "minimum_diameter_px": statistics["minimum_diameter_px"],
+                    "diameter_pv_px": statistics["diameter_pv_px"],
+                    "diameter_definition": "robust_average_circle",
+                },
                 inlier_mask=mask,
             )
         except Exception as exc:
@@ -374,6 +489,15 @@ def fit_mark_shape(points: np.ndarray, params: DetectionParams) -> FitResult:
             # Favor lower residual and higher confidence. Rectangle gets a slight bonus when
             # the edge contour is not well represented by circle/ellipse.
             base = r.confidence
+            if (
+                r.mode == "Circle"
+                and ellipse_result is not None
+                and float(ellipse_result.shape_params.get("roundness", 0.0)) >= 0.97
+                and r.residual_px <= ellipse_result.residual_px * 1.25 + 0.02
+            ):
+                # A nearly circular ellipse is the same physical hypothesis with
+                # two unnecessary degrees of freedom. Prefer the simpler circle.
+                base += 0.04
             if r.mode == "Rectangle":
                 base += 0.03
             return base

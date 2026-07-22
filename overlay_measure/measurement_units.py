@@ -56,6 +56,53 @@ def radial_diameter_residual_um(
     )
 
 
+def maximum_feret_diameter_um(
+    points_xy: Iterable[tuple[float, float]] | np.ndarray,
+    config: MeasurementConfig,
+) -> float:
+    """Maximum distance between contour points in calibrated physical units."""
+    points = np.asarray(list(points_xy) if not isinstance(points_xy, np.ndarray) else points_xy, dtype=np.float64)
+    if points.ndim != 2 or points.shape[0] < 2 or points.shape[1] != 2:
+        return 0.0
+    scaled = points.copy()
+    scaled[:, 0] *= float(config.pixel_size_x_um)
+    scaled[:, 1] *= float(config.pixel_size_y_um)
+    maximum = 0.0
+    for index in range(len(scaled)):
+        distances = np.hypot(
+            scaled[index + 1 :, 0] - scaled[index, 0],
+            scaled[index + 1 :, 1] - scaled[index, 1],
+        )
+        if len(distances):
+            maximum = max(maximum, float(np.max(distances)))
+    return maximum
+
+
+def radial_diameter_statistics_um(
+    points_xy: Iterable[tuple[float, float]] | np.ndarray,
+    center_x_px: float,
+    center_y_px: float,
+    config: MeasurementConfig,
+) -> dict[str, float]:
+    distances = points_to_um_distances(points_xy, center_x_px, center_y_px, config)
+    if len(distances) == 0:
+        return {
+            "average_diameter_um": 0.0,
+            "maximum_diameter_um": 0.0,
+            "minimum_diameter_um": 0.0,
+            "diameter_pv_um": 0.0,
+        }
+    average = 2.0 * float(np.mean(distances))
+    minimum = 2.0 * float(np.min(distances))
+    maximum = maximum_feret_diameter_um(points_xy, config)
+    return {
+        "average_diameter_um": average,
+        "maximum_diameter_um": maximum,
+        "minimum_diameter_um": minimum,
+        "diameter_pv_um": max(0.0, maximum - minimum),
+    }
+
+
 def rotated_rect_size_um(
     width_px: float,
     height_px: float,

@@ -42,6 +42,63 @@ def _quadratic_peak_offset(y_minus: float, y0: float, y_plus: float) -> float:
     return float(np.clip(offset, -1.0, 1.0))
 
 
+def refine_contour_edges(
+    gray: np.ndarray,
+    contour_points_xy: np.ndarray,
+    params: DetectionParams,
+    max_points: int = 1200,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Refine one selected closed contour to subpixel gradient-peak positions."""
+    points = np.asarray(contour_points_xy, dtype=np.float64).reshape(-1, 2)
+    if len(points) == 0:
+        return np.empty((0, 2), dtype=np.float64), np.empty((0,), dtype=np.float64)
+    stride = max(1, len(points) // max(3, int(max_points)))
+    points = points[::stride]
+    image = np.asarray(gray, dtype=np.float32)
+    sigma = max(0.0, float(params.gaussian_sigma_px))
+    blurred = cv2.GaussianBlur(image, (0, 0), sigmaX=sigma, sigmaY=sigma) if sigma > 0 else image
+    gx = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3)
+    height, width = blurred.shape[:2]
+    half_width = max(1.0, float(params.profile_half_width_px))
+    step = max(0.05, float(params.profile_step_px))
+    offsets = np.arange(-half_width, half_width + step * 0.5, step, dtype=np.float32)
+    if len(offsets) < 5:
+        offsets = np.linspace(-half_width, half_width, 9, dtype=np.float32)
+
+    refined = []
+    gradients = []
+    for x, y in points:
+        ix = int(np.clip(round(x), 0, width - 1))
+        iy = int(np.clip(round(y), 0, height - 1))
+        magnitude = float(np.hypot(gx[iy, ix], gy[iy, ix]))
+        if magnitude < float(params.min_gradient):
+            continue
+        nx = float(gx[iy, ix]) / max(magnitude, 1e-12)
+        ny = float(gy[iy, ix]) / max(magnitude, 1e-12)
+        samples = np.asarray(
+            [_bilinear_sample(blurred, float(x + offset * nx), float(y + offset * ny)) for offset in offsets],
+            dtype=np.float32,
+        )
+        if not np.isfinite(samples).all():
+            continue
+        score = np.abs(np.gradient(samples, step))
+        index = int(np.argmax(score))
+        if float(score[index]) < float(params.min_gradient):
+            continue
+        peak_offset = 0.0
+        if 0 < index < len(score) - 1:
+            peak_offset = _quadratic_peak_offset(
+                float(score[index - 1]),
+                float(score[index]),
+                float(score[index + 1]),
+            )
+        distance = float(offsets[index] + peak_offset * step)
+        refined.append((float(x + distance * nx), float(y + distance * ny)))
+        gradients.append(float(score[index]))
+    return np.asarray(refined, dtype=np.float64), np.asarray(gradients, dtype=np.float64)
+
+
 def detect_subpixel_edges(gray: np.ndarray, roi: Roi, params: DetectionParams) -> SubpixelEdges:
     """Detect subpixel edge points inside ROI.
 

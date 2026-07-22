@@ -38,6 +38,7 @@ class Roi:
     caliper_count: int = 64
     caliper_width_px: float = 8.0
     search_direction: str = "Inner to Outer"
+    diameter_mode: str = "Average"
 
     def normalized(self) -> "Roi":
         x0 = min(self.x, self.x + self.w)
@@ -54,6 +55,7 @@ class Roi:
             int(np.clip(getattr(self, "caliper_count", 64), 4, 720)),
             float(max(1.0, getattr(self, "caliper_width_px", 8.0))),
             getattr(self, "search_direction", "Inner to Outer"),
+            getattr(self, "diameter_mode", "Average"),
         )
 
     def center(self) -> Tuple[float, float]:
@@ -203,6 +205,7 @@ class MeasurementConfig:
     delta_x_limit_um: float = 0.5
     delta_y_limit_um: float = 0.5
     overlay_r_limit_um: float = 0.7
+    quality_profile: str = "Standard"
     confidence_min: float = 0.7
     rz_layout: str = "Y向前后分布"
     rz_distance_l_um: float = 1.0
@@ -262,6 +265,9 @@ class OverlayResult:
     overlay_r_um: float
     result: str
     warning: str = ""
+    quality_profile: str = ""
+    quality_grade: str = ""
+    quality_summary: str = ""
 
 
 def dataclass_to_dict(obj):

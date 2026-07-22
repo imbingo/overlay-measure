@@ -12,6 +12,7 @@ from openpyxl.utils import get_column_letter
 
 from .measurement_units import axis_scale_um_per_px, mean_pixel_size_um, rotated_rect_size_um, scalar_px_to_um
 from .models import DetectionResult, MeasurementConfig, OverlayResult
+from .quality_profiles import quality_profile_display
 
 
 DETAIL_COLUMNS = {
@@ -28,6 +29,11 @@ DETAIL_COLUMNS = {
     "center_x_um": "中心X(μm)",
     "center_y_um": "中心Y(μm)",
     "diameter_um": "直径/尺寸(μm)",
+    "average_diameter_um": "平均直径(μm)",
+    "maximum_diameter_um": "最大直径(μm)",
+    "minimum_diameter_um": "最小直径(μm)",
+    "diameter_pv_um": "直径PV(μm)",
+    "diameter_mode": "直径定义",
     "fit_residual_um": "参考残差(μm)",
     "edge_point_count": "边缘点数",
     "confidence": "置信度",
@@ -35,7 +41,12 @@ DETAIL_COLUMNS = {
     "algorithm_path": "算法路径",
     "measurement_stage": "测量阶段",
     "quality_status": "质量状态",
+    "quality_profile": "质量门槛",
+    "quality_grade": "实际质量",
+    "quality_details": "质量详情",
     "coverage": "覆盖率",
+    "angular_coverage": "角度覆盖率",
+    "maximum_gap_deg": "最大缺口角度(°)",
     "rejected_count": "剔除点数",
     "rejected_ratio": "异常点比例",
     "max_deviation_um": "最大轮廓偏差(μm)",
@@ -158,6 +169,14 @@ def build_detection_rows(
                 "center_x_um": det.center_x_um,
                 "center_y_um": det.center_y_um,
                 "diameter_um": det.diameter_um,
+                "average_diameter_um": det.shape_params.get("average_diameter_um"),
+                "maximum_diameter_um": det.shape_params.get("maximum_diameter_um"),
+                "minimum_diameter_um": det.shape_params.get("minimum_diameter_um"),
+                "diameter_pv_um": det.shape_params.get("diameter_pv_um"),
+                "diameter_mode": {"Average": "平均直径", "Maximum": "最大直径"}.get(
+                    det.shape_params.get("diameter_mode"),
+                    det.shape_params.get("diameter_mode", ""),
+                ),
                 "fit_residual_um": det.residual_um,
                 "edge_point_count": det.edge_point_count,
                 "confidence": det.confidence,
@@ -165,7 +184,12 @@ def build_detection_rows(
                 "algorithm_path": det.shape_params.get("algorithm_path", ""),
                 "measurement_stage": "正式精测" if det.shape_params.get("measurement_stage") == "production_measurement" else "候选检测",
                 "quality_status": {"Valid": "有效", "Invalid": "无效"}.get(det.shape_params.get("quality_status"), det.shape_params.get("quality_status", "")),
+                "quality_profile": det.shape_params.get("quality_profile_label", ""),
+                "quality_grade": det.shape_params.get("quality_grade", ""),
+                "quality_details": det.shape_params.get("quality_details", ""),
                 "coverage": det.shape_params.get("coverage"),
+                "angular_coverage": det.shape_params.get("angular_coverage"),
+                "maximum_gap_deg": det.shape_params.get("maximum_gap_deg"),
                 "rejected_count": det.shape_params.get("rejected_count"),
                 "rejected_ratio": det.shape_params.get("rejected_ratio"),
                 "max_deviation_um": det.shape_params.get("max_deviation_um"),
@@ -273,6 +297,12 @@ def export_results(
             {"项目": "操作人员", "内容": config.operator_name},
             {"项目": "测量模式", "内容": _mode_cn(config.mode)},
             {"项目": "工作方式", "内容": "自动识别测量" if getattr(config, "workflow_mode", "Manual") == "Auto" else "手动 ROI 测量"},
+            {"项目": "识别质量门槛", "内容": quality_profile_display(config)},
+            {"项目": "最低置信度", "内容": config.confidence_min},
+            {"项目": "最低覆盖率", "内容": config.production_min_coverage},
+            {"项目": "最大异常点比例", "内容": config.production_max_rejected_ratio},
+            {"项目": "最大残差(μm)", "内容": config.production_max_residual_um},
+            {"项目": "最大轮廓偏差(μm)", "内容": config.production_max_radial_deviation_um},
             {"项目": "自动基准 Mark", "内容": getattr(config, "auto_reference_label", "")},
             {"项目": "自动待测 Mark", "内容": getattr(config, "auto_target_label", "")},
             {"项目": "像素尺寸X(μm/px)", "内容": config.pixel_size_x_um},

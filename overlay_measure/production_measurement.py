@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import List, Tuple
+from typing import List
 
 import cv2
 import numpy as np
@@ -9,28 +9,16 @@ import numpy as np
 from .caliper_circle_detector import _profile_edge, detect_caliper_circle
 from .circle_ellipse_fitter import fit_rectangle
 from .measurement_service import attach_algorithm_path
-from .measurement_units import points_to_um_distances, radial_diameter_residual_um, rotated_rect_size_um, scalar_px_to_um
+from .measurement_units import (
+    points_to_um_distances,
+    radial_diameter_statistics_um,
+    radial_diameter_residual_um,
+    rotated_rect_size_um,
+    scalar_px_to_um,
+)
 from .models import DetectionParams, DetectionResult, MeasurementConfig, Roi
+from .quality_profiles import annotate_detection_quality
 from .subpixel_edge_detector import _bilinear_sample
-
-
-def _quality(
-    residual_um: float,
-    coverage: float,
-    rejected_ratio: float,
-    max_deviation_um: float,
-    config: MeasurementConfig,
-) -> Tuple[str, str]:
-    failures = []
-    if coverage < config.production_min_coverage:
-        failures.append(f"覆盖率不足({coverage:.1%})")
-    if rejected_ratio > config.production_max_rejected_ratio:
-        failures.append(f"异常点比例过高({rejected_ratio:.1%})")
-    if residual_um > config.production_max_residual_um:
-        failures.append(f"拟合残差超限({residual_um:.3f} μm)")
-    if max_deviation_um > config.production_max_radial_deviation_um:
-        failures.append(f"最大轮廓偏差超限({max_deviation_um:.3f} μm)")
-    return ("Invalid", "；".join(failures)) if failures else ("Valid", "")
 
 
 def _measurement_warning(quality_status: str, reason: str, config: MeasurementConfig) -> str:
@@ -67,7 +55,10 @@ def refine_circle_candidate(
     precise = detect_caliper_circle(gray, roi, params)
     count = max(1, int(config.production_caliper_count))
     found_count = len(precise.edge_points) + len(precise.rejected_points)
-    coverage = len(precise.edge_points) / count
+    # Count alone can look healthy even when all accepted points occupy one arc.
+    # Use the stricter angular coverage to prevent an incomplete arc from
+    # producing a deceptively valid center.
+    coverage = min(len(precise.edge_points) / count, precise.angular_coverage)
     rejected_ratio = len(precise.rejected_points) / max(1, found_count)
     diameter_um, residual_um = radial_diameter_residual_um(
         precise.edge_points,
@@ -77,10 +68,15 @@ def refine_circle_candidate(
         precise.residual_px,
         config,
     )
+    diameter_statistics_um = radial_diameter_statistics_um(
+        precise.edge_points,
+        precise.center_x_px,
+        precise.center_y_px,
+        config,
+    )
     distances_um = points_to_um_distances(precise.edge_points, precise.center_x_px, precise.center_y_px, config)
     radius_um = 0.5 * diameter_um
     max_deviation_um = float(np.max(np.abs(distances_um - radius_um))) if len(distances_um) else float("inf")
-    quality_status, reason = _quality(residual_um, coverage, rejected_ratio, max_deviation_um, config)
     detection = DetectionResult(
         mark_id=candidate.mark_id,
         layer=candidate.layer,
@@ -95,7 +91,7 @@ def refine_circle_candidate(
         edge_point_count=len(precise.edge_points),
         confidence=precise.confidence,
         fitting_mode="ProductionCircle",
-        warning=_measurement_warning(quality_status, reason, config),
+        warning="",
         edge_points=[(float(x), float(y)) for x, y in precise.edge_points],
         rejected_points=[(float(x), float(y)) for x, y in precise.rejected_points],
         edge_gradients=[float(value) for value in precise.gradients],
@@ -104,6 +100,16 @@ def refine_circle_candidate(
             "measurement_stage": "production_measurement",
             "shape_type": "Circle",
             "radius_px": precise.radius_px,
+            "average_diameter_px": precise.average_diameter_px,
+            "maximum_diameter_px": precise.maximum_diameter_px,
+            "minimum_diameter_px": precise.minimum_diameter_px,
+            "diameter_pv_px": precise.diameter_pv_px,
+            **diameter_statistics_um,
+            "angular_coverage": precise.angular_coverage,
+            "maximum_gap_deg": precise.maximum_gap_deg,
+            "diameter_definition": "robust_average_circle",
+            "diameter_mode": "Average",
+            "reported_diameter_um": diameter_statistics_um["average_diameter_um"],
             "width_px": 2.0 * precise.radius_px,
             "height_px": 2.0 * precise.radius_px,
             "roi_type": "Auto Caliper Circle",
@@ -119,10 +125,14 @@ def refine_circle_candidate(
             "rejected_count": len(precise.rejected_points),
             "rejected_ratio": rejected_ratio,
             "max_deviation_um": max_deviation_um,
-            "quality_status": quality_status,
-            "failure_reason": reason,
             "recipe_validation_status": config.recipe_validation_status,
         },
+    )
+    assessment = annotate_detection_quality(detection, config)
+    detection.warning = _measurement_warning(
+        "Valid" if assessment.valid else "Invalid",
+        "；".join(assessment.reasons),
+        config,
     )
     return attach_algorithm_path(detection, "Auto")
 
@@ -250,7 +260,6 @@ def refine_rectangle_candidate(
     )
     residual_um = scalar_px_to_um(fit.residual_px, config)
     max_deviation_um = scalar_px_to_um(float(np.max(errors[mask])), config) if np.any(mask) else float("inf")
-    quality_status, reason = _quality(residual_um, coverage, rejected_ratio, max_deviation_um, config)
     detection = DetectionResult(
         mark_id=candidate.mark_id,
         layer=candidate.layer,
@@ -265,7 +274,7 @@ def refine_rectangle_candidate(
         edge_point_count=len(inliers),
         confidence=fit.confidence,
         fitting_mode="ProductionRectangle",
-        warning=_measurement_warning(quality_status, reason, config),
+        warning="",
         edge_points=[(float(x), float(y)) for x, y in inliers],
         rejected_points=[(float(x), float(y)) for x, y in rejected],
         edge_gradients=[float(value) for value in gradients[mask]],
@@ -284,10 +293,14 @@ def refine_rectangle_candidate(
             "rejected_count": len(rejected),
             "rejected_ratio": rejected_ratio,
             "max_deviation_um": max_deviation_um,
-            "quality_status": quality_status,
-            "failure_reason": reason,
             "recipe_validation_status": config.recipe_validation_status,
         },
+    )
+    assessment = annotate_detection_quality(detection, config)
+    detection.warning = _measurement_warning(
+        "Valid" if assessment.valid else "Invalid",
+        "；".join(assessment.reasons),
+        config,
     )
     return attach_algorithm_path(detection, "Auto")
 
@@ -311,8 +324,9 @@ def refine_candidate(
             "measurement_stage": "production_measurement",
             "shape_type": "Rectangle" if candidate.fitting_mode == "AutoRectangle" else "Circle",
             "candidate_contour_points": candidate.shape_params.get("contour_points", candidate.edge_points),
-            "quality_status": "Invalid",
+            "quality_hard_failure": True,
             "failure_reason": failed.warning,
             "recipe_validation_status": config.recipe_validation_status,
         }
+        annotate_detection_quality(failed, config)
         return attach_algorithm_path(failed, "Auto")

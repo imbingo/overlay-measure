@@ -24,13 +24,15 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     window.show()
     app.processEvents()
 
-    assert "V1.6.1" in window.windowTitle()
+    assert "V1.7.2" in window.windowTitle()
     assert window.windowFlags() & Qt.FramelessWindowHint
     assert window.title_bar.height() == 46
     assert window.command_bar.objectName() == "commandBar"
-    assert window.version_label.text() == "V1.6.1"
+    assert window.version_label.text() == "V1.7.2"
     assert window.operation_mode == "Production"
     assert window.operation_mode_combo.currentData() == "Production"
+    assert window.quality_profile_combo.currentData() == "Standard"
+    assert "当前：标准" in window.quality_profile_hint.text()
     assert not window.side_tabs.isTabEnabled(2)
     assert not window.side_tabs.isTabEnabled(3)
     assert not window.change_engineering_password_btn.isEnabled()

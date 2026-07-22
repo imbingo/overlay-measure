@@ -10,6 +10,7 @@ from .measurement_service import attach_algorithm_path, detect_manual_roi
 from .models import DetectionParams, DetectionResult, ImageData, MarkRecipe, MeasurementConfig, OverlayResult
 from .overlay_calculator import calculate_relative_overlay
 from .production_measurement import refine_candidate
+from .quality_profiles import annotate_detection_quality, quality_profile_display
 from .traceability import create_measurement_archive
 
 
@@ -114,13 +115,14 @@ def detect_auto_set(
             measured = refine_candidate(image_map[result.layer].gray, result, params, config)
         except Exception as exc:
             measured = result
-            measured.shape_params["quality_status"] = "Invalid"
+            measured.shape_params["quality_hard_failure"] = True
             measured.shape_params["failure_reason"] = f"精测失败：{exc}"
             measured.warning = measured.shape_params["failure_reason"]
         if not (params.diameter_min_um <= measured.diameter_um <= params.diameter_max_um):
-            measured.shape_params["quality_status"] = "Invalid"
+            measured.shape_params["quality_hard_failure"] = True
             measured.shape_params["failure_reason"] = "尺寸超出配方范围"
             measured.warning = "尺寸超出配方范围"
+        annotate_detection_quality(measured, config)
         attach_algorithm_path(measured, "Auto")
         detected[label] = {result.layer: measured}
 
@@ -212,6 +214,17 @@ def _mean_overlay(mark_id: str, overlays: list[OverlayResult], config: Measureme
     if radius > config.overlay_r_limit_um:
         warnings.append("Dxy均值超限")
     result = OverlayResult(mark_id, 0.0, 0.0, dx, dy, radius, "Fail" if warnings else "Pass", "；".join(warnings))
+    result.quality_profile = quality_profile_display(config)
+    grade_order = {
+        "优秀（满足超精确）": 0,
+        "合格（满足标准）": 1,
+        "较差（仅宽容可用）": 2,
+        "无效（低于宽容门槛）": 3,
+    }
+    grades = [item.quality_grade for item in overlays if item.quality_grade]
+    if grades:
+        result.quality_grade = max(grades, key=lambda grade: grade_order.get(grade, 99))
+    result.quality_summary = f"{len(overlays)} 次有效测量；最差质量={result.quality_grade or '未评估'}"
     if config.recipe_validation_status != "Validated":
         result.result = "Trial"
         result.warning = "试测/未验证配方，不作正式判定"

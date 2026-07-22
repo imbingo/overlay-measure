@@ -50,6 +50,9 @@ def build_summary_rows(
             f"Dy{idx}(μm)": dy,
             f"Dxy{idx}(μm)": dxy,
             "判定": verdict,
+            "质量门槛": o.quality_profile,
+            "实际质量": o.quality_grade,
+            "质量详情": o.quality_summary,
             "提示": hint,
         })
 
@@ -71,6 +74,9 @@ def build_summary_rows(
             "公式": formula,
             "L(μm)": l_value,
             "判定": "试测" if rz_trial else ("不通过" if abs(rz_urad) > config.rz_limit else "通过"),
+            "质量门槛": "—",
+            "实际质量": "—",
+            "质量详情": "由 Mark1/Mark2 对位结果计算",
             "提示": "未验证配方，不作正式判定" if rz_trial else ("Rz超限" if abs(rz_urad) > config.rz_limit else ""),
         })
     return rows

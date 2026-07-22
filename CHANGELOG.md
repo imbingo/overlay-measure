@@ -1,5 +1,29 @@
 # Changelog
 
+## V1.7.2
+
+- Fixed the Analyze ROI button signal so Qt's unchecked-state argument can no longer silently disable user-facing result and error dialogs.
+- Restored friendly ROI error translation with actionable guidance for missing edges, caliper failures, excessive residuals, and invalid ROI setup.
+- Added immediate analyzing feedback, per-layer stage updates, partial-success warnings, explicit failure dialogs, button-state recovery, and runtime exception logging.
+
+## V1.7.1
+
+- Added Standard, Tolerant, and Ultra-Precise recognition-quality presets; Standard preserves the existing V1.7.0 thresholds.
+- Kept the five underlying quality limits editable in engineering mode and marks a preset as adjusted when custom values differ.
+- Separated gate validity from actual recognition quality, reporting excellent, standard, tolerant-only, or invalid quality independently of the selected gate.
+- Added quality preset, actual quality grade, and detailed metrics to recognition details, overlay results, traceability data, and Excel exports.
+
+## V1.7.0
+
+- Changed three-point circle input to an initialization aid; the reported center and average diameter now come from coherent full-circumference caliper edges, RANSAC rejection, and robust geometric circle refinement.
+- Added explicit inner-edge, outer-edge, and globally consistent strongest-edge selection so individual calipers no longer mix concentric boundaries.
+- Added a per-caliper-ROI average/maximum diameter selector plus average, maximum Feret, minimum, PV, angular-coverage, and largest-gap statistics in measurement details and Excel exports; diameter choice does not alter the fitted center.
+- Corrected the half-pixel mismatch between OpenCV pixel-center coordinates and Qt image rendering that made fitted outlines appear shifted toward the upper-left.
+- Hid completed caliper search rings, windows, edge points, and rejected points by default; diagnostics remain available on demand and stay visible for invalid results.
+- Changed solid circle and rectangle ROIs from all-edge collection to main-target segmentation followed by subpixel refinement of one connected contour.
+- Tightened circle outlier rejection, added robust orthogonal-distance refinement, and made automatic model selection prefer a circle over a nearly circular ellipse.
+- Added regression tests for concentric edge selection, noisy solid-ROI isolation, pixel-center rendering, and updated golden measurements.
+
 ## V1.6.1
 
 - Added a configurable local recipe-library location in Recipe Manager, separate from the optional shared recipe directory.

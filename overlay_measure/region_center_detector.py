@@ -9,6 +9,7 @@ import numpy as np
 from .circle_ellipse_fitter import FitResult
 from .models import DetectionParams, Roi
 from .image_loader import normalize_to_uint8
+from .subpixel_edge_detector import SubpixelEdges, refine_contour_edges
 
 
 @dataclass
@@ -19,6 +20,7 @@ class RegionCandidate:
     area: float
     score: float
     rectangularity: float
+    circularity: float
     solidity: float
     area_ratio: float
     center_distance_norm: float
@@ -93,7 +95,13 @@ def _clean_binary(binary: np.ndarray, roi_mask: np.ndarray, min_area: float, max
     return filled
 
 
-def _candidate_from_binary(binary: np.ndarray, roi_mask: np.ndarray, polarity: str, roi_center_local: tuple[float, float]) -> RegionCandidate | None:
+def _candidate_from_binary(
+    binary: np.ndarray,
+    roi_mask: np.ndarray,
+    polarity: str,
+    roi_center_local: tuple[float, float],
+    expected_shape: str = "Any",
+) -> RegionCandidate | None:
     roi_area = max(1.0, float(np.count_nonzero(roi_mask)))
     # Area limits are intentionally conservative: reject dust speckles and the
     # opposite-polarity background that fills almost the whole ROI.
@@ -140,6 +148,8 @@ def _candidate_from_binary(binary: np.ndarray, roi_mask: np.ndarray, polarity: s
         (_, _), (rw, rh), _ = rect
         rect_area = max(float(rw) * float(rh), 1e-9)
         rectangularity = float(np.clip(area / rect_area, 0.0, 1.0))
+        perimeter = max(float(cv2.arcLength(contour, True)), 1e-9)
+        circularity = float(np.clip(4.0 * np.pi * area / (perimeter * perimeter), 0.0, 1.0))
         aspect = max(float(rw), float(rh)) / max(min(float(rw), float(rh)), 1e-9)
         if aspect > 8.0:
             continue
@@ -150,12 +160,29 @@ def _candidate_from_binary(binary: np.ndarray, roi_mask: np.ndarray, polarity: s
         area_score = min(1.0, area / max(300.0, 0.03 * roi_area))
         center_score = 1.0 / (1.0 + 7.0 * dist_norm)
         border_score = 0.55 if touches_border else 1.0
-        shape_score = 0.55 * rectangularity + 0.45 * solidity
+        if expected_shape == "Circle":
+            shape_score = 0.65 * circularity + 0.35 * solidity
+        elif expected_shape == "Rectangle":
+            shape_score = 0.65 * rectangularity + 0.35 * solidity
+        else:
+            shape_score = 0.35 * circularity + 0.35 * rectangularity + 0.30 * solidity
         score = area * area_score * center_score * border_score * shape_score
 
         component_mask = np.zeros_like(valid)
         cv2.drawContours(component_mask, [contour], -1, 255, -1)
-        cand = RegionCandidate(component_mask, contour, polarity, area, score, rectangularity, solidity, area_ratio, dist_norm, touches_border)
+        cand = RegionCandidate(
+            component_mask,
+            contour,
+            polarity,
+            area,
+            score,
+            rectangularity,
+            circularity,
+            solidity,
+            area_ratio,
+            dist_norm,
+            touches_border,
+        )
         if best is None or cand.score > best.score:
             best = cand
     return best
@@ -168,31 +195,31 @@ def _sample_contour(contour_global: np.ndarray, max_points: int = 1200) -> list[
     return [(float(x), float(y)) for x, y in contour_global[::step]]
 
 
-def detect_region_center(gray: np.ndarray, roi: Roi, params: DetectionParams) -> FitResult:
-    """Detect center by ROI area segmentation, not edge fitting.
-
-    Compared with strict rectangle/circle fitting, this mode is more tolerant of
-    rounded corners and weak/discontinuous edges. It displays only the final main
-    segmented region; isolated noise components are filtered and not reported.
-    """
+def _segment_primary_candidate(
+    gray: np.ndarray,
+    roi: Roi,
+    params: DetectionParams,
+    expected_shape: str = "Any",
+) -> tuple[RegionCandidate, tuple[int, int, int, int], float]:
+    """Segment and select one main target inside a solid search ROI."""
     if gray is None:
-        raise ValueError("未导入图像，无法计算区域中心")
+        raise ValueError("未导入图像，无法识别目标")
     r = roi.normalized()
     h_img, w_img = gray.shape[:2]
-    roi_mask, (x0, y0, x1, y1) = _outer_roi_mask((h_img, w_img), r)
+    roi_mask, bounds = _outer_roi_mask((h_img, w_img), r)
+    x0, y0, x1, y1 = bounds
     crop = normalize_to_uint8(gray[y0:y1, x0:x1])
     if crop.size == 0:
-        raise ValueError("ROI 区域为空，无法计算区域中心")
+        raise ValueError("ROI 区域为空，无法识别目标")
 
     sigma = max(0.0, float(getattr(params, "gaussian_sigma_px", 1.0)))
     blurred = cv2.GaussianBlur(crop, (0, 0), sigmaX=sigma, sigmaY=sigma) if sigma > 0 else crop
-    # Median filter suppresses isolated dust/speckles before thresholding.
     if min(blurred.shape[:2]) >= 5:
         blurred = cv2.medianBlur(blurred, 3)
 
     valid_pixels = blurred[roi_mask > 0]
     if valid_pixels.size < 20:
-        raise ValueError("ROI 有效区域太小，无法计算区域中心")
+        raise ValueError("ROI 有效区域太小，无法识别目标")
     contrast = float(np.percentile(valid_pixels, 95) - np.percentile(valid_pixels, 5))
     if contrast < 3.0:
         raise ValueError("ROI 内灰度对比度过低，无法分割目标区域")
@@ -200,22 +227,63 @@ def detect_region_center(gray: np.ndarray, roi: Roi, params: DetectionParams) ->
     _, bright = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     _, dark = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     rcx, rcy = r.center()[0] - x0, r.center()[1] - y0
-
     requested = getattr(params, "polarity", "Auto")
     candidates: list[RegionCandidate | None] = []
     if requested == "Dark to Bright":
-        candidates.append(_candidate_from_binary(dark, roi_mask, "暗目标", (rcx, rcy)))
+        candidates.append(_candidate_from_binary(dark, roi_mask, "暗目标", (rcx, rcy), expected_shape))
     elif requested == "Bright to Dark":
-        candidates.append(_candidate_from_binary(bright, roi_mask, "亮目标", (rcx, rcy)))
+        candidates.append(_candidate_from_binary(bright, roi_mask, "亮目标", (rcx, rcy), expected_shape))
     else:
-        candidates.extend([
-            _candidate_from_binary(dark, roi_mask, "暗目标", (rcx, rcy)),
-            _candidate_from_binary(bright, roi_mask, "亮目标", (rcx, rcy)),
-        ])
-    candidates = [c for c in candidates if c is not None]
-    if not candidates:
-        raise ValueError("区域中心识别失败：ROI 内未分割到有效目标区域。请缩小 ROI、提高对比度或切换亮/暗目标极性。")
-    cand = max(candidates, key=lambda c: c.score)
+        candidates.extend(
+            [
+                _candidate_from_binary(dark, roi_mask, "暗目标", (rcx, rcy), expected_shape),
+                _candidate_from_binary(bright, roi_mask, "亮目标", (rcx, rcy), expected_shape),
+            ]
+        )
+    valid_candidates = [candidate for candidate in candidates if candidate is not None]
+    if not valid_candidates:
+        raise ValueError(
+            "ROI 内未找到可用主目标。请让 ROI 只覆盖一个 Mark、检查亮暗极性，或提高目标与背景的对比度。"
+        )
+    return max(valid_candidates, key=lambda candidate: candidate.score), bounds, contrast
+
+
+def detect_primary_contour_edges(
+    gray: np.ndarray,
+    roi: Roi,
+    params: DetectionParams,
+    expected_shape: str = "Any",
+) -> SubpixelEdges:
+    """Select one connected target, then refine only its contour to subpixels."""
+    candidate, (x0, y0, _x1, _y1), _contrast = _segment_primary_candidate(
+        gray,
+        roi,
+        params,
+        expected_shape,
+    )
+    contour_global = candidate.contour.reshape(-1, 2).astype(np.float64)
+    contour_global[:, 0] += x0
+    contour_global[:, 1] += y0
+    points, gradients = refine_contour_edges(gray, contour_global, params)
+    if len(points) < 3:
+        raise ValueError("主目标轮廓的有效亚像素边缘点不足")
+    return SubpixelEdges(
+        points_xy=points,
+        gradients=gradients,
+        roi_origin=(x0, y0),
+        warning=f"主目标轮廓：{candidate.polarity}，已过滤 ROI 内其他噪声与轮廓",
+    )
+
+
+def detect_region_center(gray: np.ndarray, roi: Roi, params: DetectionParams) -> FitResult:
+    """Detect center by ROI area segmentation, not edge fitting.
+
+    Compared with strict rectangle/circle fitting, this mode is more tolerant of
+    rounded corners and weak/discontinuous edges. It displays only the final main
+    segmented region; isolated noise components are filtered and not reported.
+    """
+    r = roi.normalized()
+    cand, (x0, y0, _x1, _y1), contrast = _segment_primary_candidate(gray, r, params, "Any")
 
     contour = cand.contour
     moments = cv2.moments(contour)
@@ -282,6 +350,7 @@ def detect_region_center(gray: np.ndarray, roi: Roi, params: DetectionParams) ->
             "angle_deg": report_angle,
             "region_area_px2": area,
             "rectangularity": cand.rectangularity,
+            "circularity": cand.circularity,
             "solidity": cand.solidity,
             "area_ratio": cand.area_ratio,
             "contrast": contrast,

@@ -59,6 +59,13 @@ from .measurement_units import axis_scale_um_per_px, rotated_rect_size_um
 from .models import DetectionParams, DetectionResult, ImageData, MarkRecipe, MeasurementConfig, OverlayResult, Roi
 from .overlay_calculator import calculate_overlay, calculate_relative_overlay
 from .production_measurement import refine_candidate
+from .quality_profiles import (
+    QUALITY_PROFILE_LABELS,
+    annotate_detection_quality,
+    apply_quality_profile,
+    quality_profile_display,
+    quality_profile_is_modified,
+)
 from .recipe_manager import load_recipe, save_recipe
 from .recipe_library import RecipeLibrary, RecipeLibraryEntry
 from .recipe_integrity import seal_recipe, verify_recipe
@@ -194,6 +201,7 @@ class ImageCanvas(QLabel):
         self.active_caliper_count = 64
         self.active_caliper_width_px = 8.0
         self.active_search_direction = "Inner to Outer"
+        self.active_diameter_mode = "Average"
         self.circle_pick_mode = False
         self.circle_pick_points = []
         self.circle_preview_point = None
@@ -259,6 +267,7 @@ class ImageCanvas(QLabel):
         roi_caliper_count: int = 64,
         roi_caliper_width_px: float = 8.0,
         roi_search_direction: str = "Inner to Outer",
+        roi_diameter_mode: str = "Average",
         auto_detections=None,
         show_auto_detections: bool = False,
         manual_labels=None,
@@ -278,6 +287,7 @@ class ImageCanvas(QLabel):
         self.active_caliper_count = int(roi_caliper_count)
         self.active_caliper_width_px = float(roi_caliper_width_px)
         self.active_search_direction = roi_search_direction
+        self.active_diameter_mode = roi_diameter_mode
         self.marks = marks
         self.detections = detections
         self.auto_detections = auto_detections or {}
@@ -348,7 +358,10 @@ class ImageCanvas(QLabel):
         self.offset_y = base_y + self.pan_y
 
     def image_to_widget(self, x: float, y: float):
-        return self.offset_x + x * self.scale, self.offset_y + y * self.scale
+        # OpenCV coordinates identify pixel centers, while QPainter draws the
+        # image from its outer boundary. Account for that half-pixel difference
+        # so fitted geometry is not displayed 0.5 px toward the upper-left.
+        return self.offset_x + (x + 0.5) * self.scale, self.offset_y + (y + 0.5) * self.scale
 
     def _rotated_rect_points_widget(self, cx: float, cy: float, w: float, h: float, angle_deg: float):
         theta = np.deg2rad(angle_deg)
@@ -478,9 +491,9 @@ class ImageCanvas(QLabel):
         if self.image is None or self.scale <= 0:
             return None
         h, w = self.image.gray.shape[:2]
-        x = (pos.x() - self.offset_x) / self.scale
-        y = (pos.y() - self.offset_y) / self.scale
-        if x < 0 or y < 0 or x >= w or y >= h:
+        x = (pos.x() - self.offset_x) / self.scale - 0.5
+        y = (pos.y() - self.offset_y) / self.scale - 0.5
+        if x < -0.5 or y < -0.5 or x >= w - 0.5 or y >= h - 0.5:
             return None
         return float(x), float(y)
 
@@ -489,7 +502,8 @@ class ImageCanvas(QLabel):
         if p is None:
             return None
         x, y = p
-        return QPoint(int(round(x)), int(round(y)))
+        h, w = self.image.gray.shape[:2]
+        return QPoint(int(np.clip(round(x), 0, w - 1)), int(np.clip(round(y), 0, h - 1)))
 
     def _active_roi(self) -> Optional[Roi]:
         mark = self.marks.get(self.active_mark_id)
@@ -594,6 +608,7 @@ class ImageCanvas(QLabel):
             self.active_caliper_count,
             self.active_caliper_width_px,
             self.active_search_direction,
+            self.active_diameter_mode,
         ).normalized()
 
     def _move_active_roi(self, pos):
@@ -676,15 +691,15 @@ class ImageCanvas(QLabel):
         if before is None:
             # Zoom around widget center when the cursor is outside the image.
             before = (
-                (center_pos.x() - self.offset_x) / max(self.scale, 1e-12),
-                (center_pos.y() - self.offset_y) / max(self.scale, 1e-12),
+                (center_pos.x() - self.offset_x) / max(self.scale, 1e-12) - 0.5,
+                (center_pos.y() - self.offset_y) / max(self.scale, 1e-12) - 0.5,
             )
         self.user_zoom = float(np.clip(self.user_zoom * factor, 0.05, 80.0))
         new_scale = self.fit_scale * self.user_zoom
         base_x, base_y = self._base_offset_for_scale(new_scale)
         img_x, img_y = before
-        self.pan_x = center_pos.x() - img_x * new_scale - base_x
-        self.pan_y = center_pos.y() - img_y * new_scale - base_y
+        self.pan_x = center_pos.x() - (img_x + 0.5) * new_scale - base_x
+        self.pan_y = center_pos.y() - (img_y + 0.5) * new_scale - base_y
         self.update()
 
     def paintEvent(self, event):
@@ -764,26 +779,35 @@ class ImageCanvas(QLabel):
                 if not self.fixed_layer and layer != self.active_layer:
                     continue
                 roi = mark.upper_roi if layer == "upper" else mark.lower_roi
-                if roi is not None:
+                det = self.detections.get(mark_id, {}).get(layer)
+                detection_valid = det is not None and det.shape_params.get("quality_status", "Valid") != "Invalid"
+                hide_completed_caliper = (
+                    roi is not None
+                    and getattr(roi, "roi_type", "") == "Caliper Circle"
+                    and detection_valid
+                    and not self.show_diagnostics
+                )
+                if roi is not None and not hide_completed_caliper:
                     is_active = (mark_id == self.active_mark_id and layer == self.active_layer)
                     self._draw_roi_shape(painter, roi, colors[layer], is_active, f"{mark_id} {LAYER_LABELS[layer]}")
 
-                det = self.detections.get(mark_id, {}).get(layer)
                 if det is not None:
-                    painter.setPen(QPen(QColor("#34C759"), 1.0))
-                    pts = det.edge_points
-                    if pts:
-                        step = max(1, len(pts) // 1200)
-                        for px, py in pts[::step]:
-                            wx, wy = self.image_to_widget(px, py)
-                            painter.drawEllipse(QRectF(wx - 2.0, wy - 2.0, 4.0, 4.0))
-                    rejected = getattr(det, "rejected_points", [])
-                    if rejected:
-                        painter.setPen(QPen(QColor("#FF3B30"), 1.4))
-                        for px, py in rejected:
-                            wx, wy = self.image_to_widget(px, py)
-                            painter.drawLine(int(wx - 3), int(wy - 3), int(wx + 3), int(wy + 3))
-                            painter.drawLine(int(wx - 3), int(wy + 3), int(wx + 3), int(wy - 3))
+                    show_point_diagnostics = self.show_diagnostics or not detection_valid
+                    if show_point_diagnostics:
+                        painter.setPen(QPen(QColor("#34C759"), 1.0))
+                        pts = det.edge_points
+                        if pts:
+                            step = max(1, len(pts) // 1200)
+                            for px, py in pts[::step]:
+                                wx, wy = self.image_to_widget(px, py)
+                                painter.drawEllipse(QRectF(wx - 2.0, wy - 2.0, 4.0, 4.0))
+                        rejected = getattr(det, "rejected_points", [])
+                        if rejected:
+                            painter.setPen(QPen(QColor("#FF3B30"), 1.4))
+                            for px, py in rejected:
+                                wx, wy = self.image_to_widget(px, py)
+                                painter.drawLine(int(wx - 3), int(wy - 3), int(wx + 3), int(wy + 3))
+                                painter.drawLine(int(wx - 3), int(wy + 3), int(wx + 3), int(wy - 3))
                     cx, cy = self.image_to_widget(det.center_x_px, det.center_y_px)
                     fit_color = QColor("#34C759")
                     painter.setPen(QPen(fit_color, 2.0))
@@ -797,13 +821,14 @@ class ImageCanvas(QLabel):
                         rad = det.shape_params["radius_px"] * self.scale
                         painter.setPen(QPen(fit_color, 2.0))
                         painter.drawEllipse(QRectF(cx - rad, cy - rad, 2 * rad, 2 * rad))
-                        if det.fitting_mode == "CaliperCircle":
-                            radius_um = det.shape_params.get("radius_px", 0) * self._mean_pixel_size_um()
+                        if det.fitting_mode == "CaliperCircle" and self.show_diagnostics:
+                            average_um = float(det.shape_params.get("average_diameter_um", det.diameter_um))
+                            maximum_um = float(det.shape_params.get("maximum_diameter_um", average_um))
                             painter.setPen(fit_color)
                             painter.drawText(
                                 int(cx + 12),
                                 int(cy - 12),
-                                f"中心=({det.center_x_um:.3f},{det.center_y_um:.3f}) μm 半径={radius_um:.3f} μm 残差={det.residual_um:.3f} μm 置信度={det.confidence:.3f}",
+                                f"中心=({det.center_x_um:.3f},{det.center_y_um:.3f}) μm 平均直径={average_um:.3f} μm 最大直径={maximum_um:.3f} μm",
                             )
                     elif det.fitting_mode == "RegionCenter":
                         # V1.4: region-center mode is area segmentation, not circle fitting.
@@ -1692,13 +1717,14 @@ class MainWindow(QMainWindow):
             if font_path.exists() and QFontDatabase.addApplicationFont(str(font_path)) >= 0:
                 break
         self.setFont(QFont("Microsoft YaHei UI", 9))
-        self.setWindowTitle("对位偏差测量软件 V1.6.1")
+        self.setWindowTitle("对位偏差测量软件 V1.7.2")
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setMinimumSize(1120, 720)
         self.resize(1500, 920)
 
         self.config = MeasurementConfig()
         self.params = DetectionParams()
+        self._updating_quality_controls = False
         self.upper_image: Optional[ImageData] = None
         self.lower_image: Optional[ImageData] = None
         self.marks: Dict[str, MarkRecipe] = {"Mark1": MarkRecipe("Mark1"), "Mark2": MarkRecipe("Mark2")}
@@ -1858,7 +1884,7 @@ class MainWindow(QMainWindow):
         self.title_label = QLabel("对位偏差测量软件")
         self.title_label.setObjectName("titleLabel")
         self.title_label.setMinimumWidth(142)
-        self.version_label = QLabel("V1.6.1")
+        self.version_label = QLabel("V1.7.2")
         self.version_label.setObjectName("versionLabel")
         self.operation_mode_combo = QComboBox()
         self.operation_mode_combo.setObjectName("accessMode")
@@ -2387,6 +2413,9 @@ class MainWindow(QMainWindow):
         self.target_edge_combo.addItem("靠近内环", "Near Inner Boundary")
         self.target_edge_combo.addItem("靠近外环", "Near Outer Boundary")
         self.target_edge_combo.addItem("最强边缘", "Strongest Edge")
+        self.diameter_mode_combo = SidebarComboBox()
+        self.diameter_mode_combo.addItem("平均直径（推荐）", "Average")
+        self.diameter_mode_combo.addItem("最大直径", "Maximum")
         self.inner_ratio_spin = SidebarDoubleSpinBox()
         self.inner_ratio_spin.setRange(0.0, 0.98)
         self.inner_ratio_spin.setDecimals(3)
@@ -2411,6 +2440,7 @@ class MainWindow(QMainWindow):
         form_roi.addRow("卡尺宽度", self.caliper_width_spin)
         form_roi.addRow("搜索方向", self.search_direction_combo)
         form_roi.addRow("目标边缘", self.target_edge_combo)
+        form_roi.addRow("圆直径定义", self.diameter_mode_combo)
         form_roi.addRow("矩形环角度", self.roi_angle_spin)
         form_roi.addRow(self.three_point_circle_btn)
         form_roi.addRow(self.apply_roi_params_btn)
@@ -2540,6 +2570,23 @@ class MainWindow(QMainWindow):
         rz_section.add_widget(group_rz)
         layout.addWidget(rz_section)
 
+        quality_section = CollapsibleSection("识别质量门槛", True)
+        quality_group = QGroupBox("质量预设")
+        quality_layout = QVBoxLayout(quality_group)
+        quality_form = QFormLayout()
+        self.quality_profile_combo = SidebarComboBox()
+        self.quality_profile_combo.addItem("标准（默认）", "Standard")
+        self.quality_profile_combo.addItem("宽容（来料质量较差）", "Tolerant")
+        self.quality_profile_combo.addItem("超精确（高质量来料）", "UltraPrecise")
+        quality_form.addRow("识别质量门槛", self.quality_profile_combo)
+        quality_layout.addLayout(quality_form)
+        self.quality_profile_hint = QLabel()
+        self.quality_profile_hint.setWordWrap(True)
+        self.quality_profile_hint.setObjectName("statusCaption")
+        quality_layout.addWidget(self.quality_profile_hint)
+        quality_section.add_widget(quality_group)
+        layout.addWidget(quality_section)
+
         advanced_section = CollapsibleSection("亚像素与正式精测参数", False)
         group = QGroupBox("亚像素算法")
         form = QFormLayout(group)
@@ -2567,20 +2614,27 @@ class MainWindow(QMainWindow):
         form.addRow("边缘极性", self.polarity_combo)
         form.addRow("任务超时 (s)", self.measurement_timeout_spin)
         advanced_section.add_widget(group)
-        production_group = QGroupBox("自动正式精测 / 质量门槛")
+        production_group = QGroupBox("自动正式精测")
         production_form = QFormLayout(production_group)
         self.production_search_spin = SidebarDoubleSpinBox(); self.production_search_spin.setRange(2.0, 1000.0); self.production_search_spin.setDecimals(3); self.production_search_spin.setValue(8.0)
+        production_form.addRow("自动搜索半宽 (px)", self.production_search_spin)
+        advanced_section.add_widget(production_group)
+
+        quality_detail_group = QGroupBox("质量门槛详细参数（特殊需求）")
+        quality_detail_form = QFormLayout(quality_detail_group)
+        self.conf_min_spin = SidebarDoubleSpinBox(); self.conf_min_spin.setRange(0, 1); self.conf_min_spin.setDecimals(3); self.conf_min_spin.setSingleStep(0.05); self.conf_min_spin.setValue(0.7)
         self.production_coverage_spin = SidebarDoubleSpinBox(); self.production_coverage_spin.setRange(0.0, 1.0); self.production_coverage_spin.setDecimals(3); self.production_coverage_spin.setValue(0.65)
         self.production_reject_spin = SidebarDoubleSpinBox(); self.production_reject_spin.setRange(0.0, 1.0); self.production_reject_spin.setDecimals(3); self.production_reject_spin.setValue(0.40)
         self.production_residual_spin = SidebarDoubleSpinBox(); self.production_residual_spin.setRange(0.000001, 1000000.0); self.production_residual_spin.setDecimals(6); self.production_residual_spin.setValue(0.30)
         self.production_deviation_spin = SidebarDoubleSpinBox(); self.production_deviation_spin.setRange(0.000001, 1000000.0); self.production_deviation_spin.setDecimals(6); self.production_deviation_spin.setValue(0.60)
-        production_form.addRow("自动搜索半宽 (px)", self.production_search_spin)
-        production_form.addRow("最低覆盖率", self.production_coverage_spin)
-        production_form.addRow("最大异常点比例", self.production_reject_spin)
-        production_form.addRow("最大残差 (μm)", self.production_residual_spin)
-        production_form.addRow("最大轮廓偏差 (μm)", self.production_deviation_spin)
-        advanced_section.add_widget(production_group)
+        quality_detail_form.addRow("最低置信度", self.conf_min_spin)
+        quality_detail_form.addRow("最低覆盖率", self.production_coverage_spin)
+        quality_detail_form.addRow("最大异常点比例", self.production_reject_spin)
+        quality_detail_form.addRow("最大残差 (μm)", self.production_residual_spin)
+        quality_detail_form.addRow("最大轮廓偏差 (μm)", self.production_deviation_spin)
+        advanced_section.add_widget(quality_detail_group)
         layout.addWidget(advanced_section)
+        self._refresh_quality_profile_hint()
         layout.addStretch(1)
         return w
 
@@ -2589,14 +2643,12 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(w)
         group = QGroupBox("判定规格")
         form = QFormLayout(group)
-        self.dx_limit_spin = SidebarDoubleSpinBox(); self.dy_limit_spin = SidebarDoubleSpinBox(); self.r_limit_spin = SidebarDoubleSpinBox(); self.conf_min_spin = SidebarDoubleSpinBox()
+        self.dx_limit_spin = SidebarDoubleSpinBox(); self.dy_limit_spin = SidebarDoubleSpinBox(); self.r_limit_spin = SidebarDoubleSpinBox()
         for spin, val in [(self.dx_limit_spin, 0.5), (self.dy_limit_spin, 0.5), (self.r_limit_spin, 0.7)]:
             spin.setRange(0, 1000000); spin.setDecimals(6); spin.setSingleStep(0.1); spin.setValue(val)
-        self.conf_min_spin.setRange(0, 1); self.conf_min_spin.setDecimals(3); self.conf_min_spin.setSingleStep(0.05); self.conf_min_spin.setValue(0.7)
         form.addRow("|ΔX| 上限 (μm)", self.dx_limit_spin)
         form.addRow("|ΔY| 上限 (μm)", self.dy_limit_spin)
         form.addRow("对位 R 上限 (μm)", self.r_limit_spin)
-        form.addRow("最低置信度", self.conf_min_spin)
         layout.addWidget(group)
         note = QLabel("导出的报告格式与 V1.0.5 保持一致。")
         note.setObjectName("statusCaption")
@@ -2606,6 +2658,15 @@ class MainWindow(QMainWindow):
 
     def _connect_actions(self):
         self.operation_mode_combo.currentIndexChanged.connect(self.on_operation_mode_changed)
+        self.quality_profile_combo.currentIndexChanged.connect(self.on_quality_profile_changed)
+        for quality_control in (
+            self.conf_min_spin,
+            self.production_coverage_spin,
+            self.production_reject_spin,
+            self.production_residual_spin,
+            self.production_deviation_spin,
+        ):
+            quality_control.valueChanged.connect(self.on_quality_threshold_edited)
         self.change_engineering_password_btn.clicked.connect(self.change_engineering_password)
         self.import_upper_btn.clicked.connect(self.import_upper_image)
         self.import_lower_btn.clicked.connect(self.import_lower_image)
@@ -2646,6 +2707,7 @@ class MainWindow(QMainWindow):
         self.caliper_width_spin.valueChanged.connect(self.apply_roi_params_to_current)
         self.search_direction_combo.currentTextChanged.connect(self.apply_roi_params_to_current)
         self.target_edge_combo.currentTextChanged.connect(self._refresh_all_widgets)
+        self.diameter_mode_combo.currentTextChanged.connect(self._refresh_all_widgets)
         self.inner_ratio_spin.valueChanged.connect(self._refresh_all_widgets)
         self.roi_angle_spin.valueChanged.connect(self._refresh_all_widgets)
         self.three_point_circle_btn.toggled.connect(self.on_three_point_circle_toggled)
@@ -2657,7 +2719,12 @@ class MainWindow(QMainWindow):
         self.clear_recipe_rois_btn.clicked.connect(self.clear_all_recipe_rois)
         self.upper_canvas.roiChanged.connect(self.set_roi)
         self.lower_canvas.roiChanged.connect(self.set_roi)
-        self.analyze_roi_btn.clicked.connect(self.analyze_roi_regions)
+        # QPushButton.clicked emits a checked boolean. Passing that signal
+        # directly used to overwrite show_message=False and silently suppress
+        # every error dialog for a normal (unchecked) button click.
+        self.analyze_roi_btn.clicked.connect(
+            lambda checked=False: self.analyze_roi_regions(show_message=True)
+        )
         self.analyze_current_btn.clicked.connect(self.analyze_current_mark)
         self.analyze_all_btn.clicked.connect(self.analyze_all_marks)
         self.export_btn.clicked.connect(self.export_result_file)
@@ -2782,6 +2849,32 @@ class MainWindow(QMainWindow):
         # V1.2.5：取消独立日志窗口，所有操作反馈统一显示在左下角状态栏，避免界面拥挤。
         self.statusBar().showMessage(message, 3500)
 
+    def _friendly_error(self, exc: Exception) -> str:
+        message = str(exc).strip()
+        if not message:
+            return "分析发生未知异常。请检查图像、ROI 和算法参数后重试。"
+        if "有效边缘点不足" in message or "最少边缘点数" in message:
+            return (
+                "有效边缘点不足。请确认 ROI 覆盖目标边缘，适当扩大搜索环带、"
+                "降低最小梯度，或切换到宽容质量门槛。\n"
+                f"详细信息：{message}"
+            )
+        if "卡尺找圆" in message and "不足" in message:
+            return (
+                "卡尺圆找到的有效边缘点不足。请收窄到正确边缘、检查搜索方向和边缘极性，"
+                "或适当降低最小梯度。\n"
+                f"详细信息：{message}"
+            )
+        if "残差" in message:
+            return (
+                "拟合残差超过当前要求。请确认 ROI 是否混入其他边缘；来料加工质量较差时，"
+                "可由工程人员评估后使用宽容质量门槛。\n"
+                f"详细信息：{message}"
+            )
+        if "ROI" in message:
+            return f"ROI 分析失败。请确认已导入对应图像，并且 ROI 框住目标特征。\n详细信息：{message}"
+        return message
+
     def show_algorithm_path_dialog(self):
         text = getattr(self, "algorithm_path_text", "暂无测量结果；分析 ROI 或自动识别后可查看实际算法路径。")
         QMessageBox.information(self, "算法路径", text.replace("；", "\n\n"))
@@ -2817,6 +2910,7 @@ class MainWindow(QMainWindow):
         self.config.delta_x_limit_um = self.dx_limit_spin.value()
         self.config.delta_y_limit_um = self.dy_limit_spin.value()
         self.config.overlay_r_limit_um = self.r_limit_spin.value()
+        self.config.quality_profile = self._combo_value(self.quality_profile_combo)
         self.config.confidence_min = self.conf_min_spin.value()
         self.config.rz_layout = self.rz_layout_combo.currentText()
         self.config.rz_distance_l_um = self.rz_l_spin.value()
@@ -2865,6 +2959,13 @@ class MainWindow(QMainWindow):
         self.dx_limit_spin.setValue(self.config.delta_x_limit_um)
         self.dy_limit_spin.setValue(self.config.delta_y_limit_um)
         self.r_limit_spin.setValue(self.config.overlay_r_limit_um)
+        self.quality_profile_combo.blockSignals(True)
+        self._set_combo_value(
+            self.quality_profile_combo,
+            getattr(self.config, "quality_profile", "Standard"),
+        )
+        self.quality_profile_combo.blockSignals(False)
+        self._updating_quality_controls = True
         self.conf_min_spin.setValue(self.config.confidence_min)
         self.rz_layout_combo.setCurrentText(getattr(self.config, "rz_layout", "Y向前后分布"))
         self.rz_l_spin.setValue(getattr(self.config, "rz_distance_l_um", 1.0))
@@ -2876,6 +2977,8 @@ class MainWindow(QMainWindow):
         self.production_reject_spin.setValue(getattr(self.config, "production_max_rejected_ratio", 0.40))
         self.production_residual_spin.setValue(getattr(self.config, "production_max_residual_um", 0.30))
         self.production_deviation_spin.setValue(getattr(self.config, "production_max_radial_deviation_um", 0.60))
+        self._updating_quality_controls = False
+        self._refresh_quality_profile_hint()
 
         self.sigma_spin.setValue(self.params.gaussian_sigma_px)
         self.canny_low_spin.setValue(self.params.canny_low)
@@ -2994,6 +3097,79 @@ class MainWindow(QMainWindow):
                 return
         combo.setCurrentText(value)
 
+    def _set_quality_threshold_controls(self):
+        controls = (
+            (self.conf_min_spin, self.config.confidence_min),
+            (self.production_coverage_spin, self.config.production_min_coverage),
+            (self.production_reject_spin, self.config.production_max_rejected_ratio),
+            (self.production_residual_spin, self.config.production_max_residual_um),
+            (self.production_deviation_spin, self.config.production_max_radial_deviation_um),
+        )
+        self._updating_quality_controls = True
+        try:
+            for control, value in controls:
+                control.blockSignals(True)
+                control.setValue(value)
+                control.blockSignals(False)
+        finally:
+            self._updating_quality_controls = False
+
+    def _sync_quality_config_from_controls(self):
+        self.config.quality_profile = self._combo_value(self.quality_profile_combo)
+        self.config.confidence_min = self.conf_min_spin.value()
+        self.config.production_min_coverage = self.production_coverage_spin.value()
+        self.config.production_max_rejected_ratio = self.production_reject_spin.value()
+        self.config.production_max_residual_um = self.production_residual_spin.value()
+        self.config.production_max_radial_deviation_um = self.production_deviation_spin.value()
+
+    def _refresh_quality_profile_hint(self):
+        if not hasattr(self, "quality_profile_hint"):
+            return
+        profile = quality_profile_display(self.config)
+        modified = quality_profile_is_modified(self.config)
+        self.quality_profile_hint.setText(
+            f"当前：{profile}。置信度≥{self.config.confidence_min:.2f}，"
+            f"覆盖率≥{self.config.production_min_coverage:.0%}，"
+            f"异常点≤{self.config.production_max_rejected_ratio:.0%}，"
+            f"残差≤{self.config.production_max_residual_um:.3f} μm，"
+            f"最大轮廓偏差≤{self.config.production_max_radial_deviation_um:.3f} μm。"
+            + (" 详细参数已偏离该预设。" if modified else "")
+        )
+        self.quality_profile_hint.setToolTip(
+            "宽容模式只放宽结果是否可用；识别明细仍会显示实际质量为优秀、合格、较差或无效。"
+        )
+
+    def _quality_settings_changed(self, message: str):
+        for mark_map in self.detections.values():
+            for detection in mark_map.values():
+                annotate_detection_quality(detection, self.config)
+        for detected_by_label in self.auto_detections_by_mark.values():
+            for layer_map in detected_by_label.values():
+                for detection in layer_map.values():
+                    annotate_detection_quality(detection, self.config)
+        self.overlays = {}
+        self.auto_overlays = {}
+        self.batch_overlays = {"Mark1": [], "Mark2": []}
+        self.batch_run_records = {"Mark1": [], "Mark2": []}
+        self._refresh_quality_profile_hint()
+        self._refresh_auto_selection_combos()
+        self._refresh_all_widgets()
+        self._append_log(message + "，请重新计算对位偏差。")
+
+    def on_quality_profile_changed(self):
+        if self._updating_quality_controls:
+            return
+        profile = self._combo_value(self.quality_profile_combo)
+        apply_quality_profile(self.config, profile)
+        self._set_quality_threshold_controls()
+        self._quality_settings_changed(f"识别质量门槛已切换为{QUALITY_PROFILE_LABELS[profile]}")
+
+    def on_quality_threshold_edited(self):
+        if self._updating_quality_controls:
+            return
+        self._sync_quality_config_from_controls()
+        self._quality_settings_changed("识别质量详细参数已调整")
+
     def _fit_mode_for_layer(self, layer: str) -> str:
         if layer == "upper":
             mode = self._combo_value(self.upper_fit_mode_combo) if hasattr(self, "upper_fit_mode_combo") else getattr(self.params, "upper_fitting_mode", self.params.fitting_mode)
@@ -3059,6 +3235,7 @@ class MainWindow(QMainWindow):
             self.caliper_width_spin.blockSignals(True)
             self.search_direction_combo.blockSignals(True)
             self.target_edge_combo.blockSignals(True)
+            self.diameter_mode_combo.blockSignals(True)
             self.inner_ratio_spin.blockSignals(True)
             self.roi_angle_spin.blockSignals(True)
             self._set_combo_value(self.roi_type_combo, getattr(roi, "roi_type", "Annulus"))
@@ -3071,6 +3248,7 @@ class MainWindow(QMainWindow):
             self.caliper_width_spin.setValue(float(getattr(roi, "caliper_width_px", 8.0)))
             self._set_combo_value(self.search_direction_combo, getattr(roi, "search_direction", "Inner to Outer"))
             self._set_combo_value(self.target_edge_combo, getattr(roi, "target_edge", "All Edges"))
+            self._set_combo_value(self.diameter_mode_combo, getattr(roi, "diameter_mode", "Average"))
             self.inner_ratio_spin.setValue(float(getattr(roi, "inner_ratio", 0.60)))
             self.roi_angle_spin.setValue(float(getattr(roi, "angle_deg", 0.0)))
             self.roi_type_combo.blockSignals(False)
@@ -3082,6 +3260,7 @@ class MainWindow(QMainWindow):
             self.caliper_width_spin.blockSignals(False)
             self.search_direction_combo.blockSignals(False)
             self.target_edge_combo.blockSignals(False)
+            self.diameter_mode_combo.blockSignals(False)
             self.inner_ratio_spin.blockSignals(False)
             self.roi_angle_spin.blockSignals(False)
         self._refresh_all_widgets()
@@ -3110,6 +3289,7 @@ class MainWindow(QMainWindow):
         roi.caliper_count = self.caliper_count_spin.value()
         roi.caliper_width_px = self.caliper_width_spin.value()
         roi.search_direction = self._combo_value(self.search_direction_combo)
+        roi.diameter_mode = self._combo_value(self.diameter_mode_combo)
         self.roi_sources.setdefault(mark_id, {})[layer] = "manual"
         self._recipe_roi_confirmation_signature = None
         if mark_id in self.detections and layer in self.detections[mark_id]:
@@ -3128,6 +3308,7 @@ class MainWindow(QMainWindow):
             self.caliper_width_spin.setValue(float(getattr(roi, "caliper_width_px", 8.0)))
             self._set_combo_value(self.search_direction_combo, getattr(roi, "search_direction", "Inner to Outer"))
             self._set_combo_value(self.target_edge_combo, getattr(roi, "target_edge", "All Edges"))
+            self._set_combo_value(self.diameter_mode_combo, getattr(roi, "diameter_mode", "Average"))
             self.inner_ratio_spin.setValue(float(getattr(roi, "inner_ratio", 0.60)))
             self.roi_angle_spin.setValue(float(getattr(roi, "angle_deg", 0.0)))
         self._refresh_all_widgets()
@@ -3164,6 +3345,7 @@ class MainWindow(QMainWindow):
         roi_caliper_count = self.caliper_count_spin.value() if hasattr(self, "caliper_count_spin") else 64
         roi_caliper_width_px = self.caliper_width_spin.value() if hasattr(self, "caliper_width_spin") else 8.0
         roi_search_direction = self._combo_value(self.search_direction_combo) if hasattr(self, "search_direction_combo") else "Inner to Outer"
+        roi_diameter_mode = self._combo_value(self.diameter_mode_combo) if hasattr(self, "diameter_mode_combo") else "Average"
         show_auto = self._is_auto_workflow()
         if hasattr(self, "roi_source_label"):
             self.roi_source_label.setText(self._roi_source_text(self._roi_source(current_mark, current_layer)))
@@ -3195,6 +3377,7 @@ class MainWindow(QMainWindow):
             roi_caliper_count,
             roi_caliper_width_px,
             roi_search_direction,
+            roi_diameter_mode,
             current_auto_detections,
             show_auto,
             manual_labels,
@@ -3217,6 +3400,7 @@ class MainWindow(QMainWindow):
             roi_caliper_count,
             roi_caliper_width_px,
             roi_search_direction,
+            roi_diameter_mode,
             current_auto_detections,
             show_auto,
             manual_labels,
@@ -3478,7 +3662,8 @@ class MainWindow(QMainWindow):
         det_headers = [
             "标记", "层", "中心 X (μm)", "中心 Y (μm)",
             "尺寸/直径 (μm)", "参考残差 (μm)", "边缘点数", "置信度", "算法",
-            "质量状态", "覆盖率", "形状参数", "算法路径", "提示",
+            "质量状态", "质量门槛", "实际质量", "质量详情", "覆盖率",
+            "形状参数", "算法路径", "提示",
         ]
         det_rows = []
         display_detections = self._display_detections()
@@ -3507,7 +3692,9 @@ class MainWindow(QMainWindow):
                         f"角度={d.shape_params.get('angle_deg', 0):.3f}°"
                     )
                 elif d.fitting_mode == "Circle":
-                    shape_txt = f"半径={d.diameter_um / 2.0:.3f}μm"
+                    average = float(d.shape_params.get("average_diameter_um", d.diameter_um))
+                    maximum = float(d.shape_params.get("maximum_diameter_um", average))
+                    shape_txt = f"平均直径={average:.3f}μm, 最大直径={maximum:.3f}μm"
                 elif d.fitting_mode == "EdgeCenter":
                     shape_txt = (
                         f"边缘中心, 参考半径={d.diameter_um / 2.0:.3f}μm, "
@@ -3515,8 +3702,12 @@ class MainWindow(QMainWindow):
                         f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm"
                     )
                 elif d.fitting_mode == "CaliperCircle":
+                    average = float(d.shape_params.get("average_diameter_um", d.diameter_um))
+                    maximum = float(d.shape_params.get("maximum_diameter_um", average))
+                    definition = "最大直径" if d.shape_params.get("diameter_mode") == "Maximum" else "平均直径"
                     shape_txt = (
-                        f"卡尺圆, 半径={d.diameter_um / 2.0:.3f}μm, "
+                        f"卡尺圆, 平均直径={average:.3f}μm, 最大直径={maximum:.3f}μm, "
+                        f"采用={definition}, "
                         f"内点={d.shape_params.get('inlier_count', 0)}, "
                         f"剔除={d.shape_params.get('rejected_count', 0)}, "
                         f"卡尺={d.shape_params.get('caliper_count', 0)}"
@@ -3535,11 +3726,16 @@ class MainWindow(QMainWindow):
                     )
                 elif d.fitting_mode in {"AutoCircle", "AutoRectangle", "ProductionCircle"}:
                     shape_type = "方形精测" if d.fitting_mode == "ProductionRectangle" else ("圆形精测" if d.fitting_mode == "ProductionCircle" else ("方形轮廓" if d.fitting_mode == "AutoRectangle" else "圆形轮廓"))
-                    shape_txt = (
-                        f"{shape_type}, 参考半径={d.diameter_um / 2.0:.3f}μm, "
-                        f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.3f}μm, "
-                        f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm"
-                    )
+                    if d.fitting_mode == "ProductionCircle":
+                        average = float(d.shape_params.get("average_diameter_um", d.diameter_um))
+                        maximum = float(d.shape_params.get("maximum_diameter_um", average))
+                        shape_txt = f"{shape_type}, 平均直径={average:.3f}μm, 最大直径={maximum:.3f}μm"
+                    else:
+                        shape_txt = (
+                            f"{shape_type}, 参考半径={d.diameter_um / 2.0:.3f}μm, "
+                            f"宽={d.shape_params.get('width_px', 0) * self.config.pixel_size_x_um:.3f}μm, "
+                            f"高={d.shape_params.get('height_px', 0) * self.config.pixel_size_y_um:.3f}μm"
+                        )
                 else:
                     shape_txt = ""
                 mode_txt = {
@@ -3580,6 +3776,9 @@ class MainWindow(QMainWindow):
                     f"{d.diameter_um:.3f}", f"{d.residual_um:.3f}",
                     str(d.edge_point_count), f"{d.confidence:.3f}", mode_txt,
                     {"Valid": "有效", "Invalid": "无效"}.get(d.shape_params.get("quality_status", ""), ""),
+                    d.shape_params.get("quality_profile_label", quality_profile_display(self.config)),
+                    d.shape_params.get("quality_grade", "未评估"),
+                    d.shape_params.get("quality_details", ""),
                     f"{d.shape_params.get('coverage', 0):.1%}" if "coverage" in d.shape_params else "",
                     shape_txt + "; " + roi_txt,
                     d.shape_params.get("algorithm_path", describe_algorithm_path(d, "Auto" if self._is_auto_workflow() else "Manual")),
@@ -3587,18 +3786,32 @@ class MainWindow(QMainWindow):
                 ])
         self._fill_table(self.det_table, det_headers, det_rows)
 
-        ov_headers = ["项目", "Dx/Dy/Dxy/Rz", "数值", "判定", "提示"]
+        ov_headers = ["项目", "Dx/Dy/Dxy/Rz", "数值", "判定", "质量门槛", "实际质量", "质量详情", "提示"]
         ov_rows = []
+        display_overlays = self._display_overlays()
         for row in self._build_summary_rows():
             project = row.get("项目", "")
             verdict = row.get("判定", "")
             note = row.get("提示", "")
+            overlay = display_overlays.get(project)
+            profile = overlay.quality_profile if overlay else (quality_profile_display(self.config) if project != "Rz" else "—")
+            grade = overlay.quality_grade if overlay else ("未评估" if project != "Rz" else "—")
+            quality_summary = overlay.quality_summary if overlay else ""
             for key, value in row.items():
-                if key in {"项目", "判定", "提示", "公式", "L(μm)"}:
+                if key in {"项目", "判定", "质量门槛", "实际质量", "质量详情", "提示", "公式", "L(μm)"}:
                     continue
-                ov_rows.append([project, key, f"{value:.3f}" if isinstance(value, float) else value, verdict, note])
+                ov_rows.append([
+                    project,
+                    key,
+                    f"{value:.3f}" if isinstance(value, float) else value,
+                    verdict,
+                    profile,
+                    grade,
+                    quality_summary,
+                    note,
+                ])
             if project == "Rz":
-                ov_rows[-1][4] = f"{row.get('公式', '')}；L={row.get('L(μm)', '')}；{note}".strip("；")
+                ov_rows[-1][7] = f"{row.get('公式', '')}；L={row.get('L(μm)', '')}；{note}".strip("；")
         self._fill_table(self.overlay_table, ov_headers, ov_rows)
 
     def _fill_table(self, table: QTableWidget, headers, rows):
@@ -3609,9 +3822,22 @@ class MainWindow(QMainWindow):
             for c, val in enumerate(row):
                 item = QTableWidgetItem(str(val))
                 row_text = " ".join(str(x) for x in row)
-                if any(token in row_text for token in ("失败", "超限", "无效", "异常", "Fail", "Invalid", "Error")):
+                row_values = {str(value).strip() for value in row}
+                hard_failure = bool(
+                    row_values.intersection({"失败", "超限", "无效", "异常", "Fail", "Invalid", "Error"})
+                ) or any(
+                    token in row_text
+                    for token in ("识别失败", "计算异常", "低于宽容门槛", "超出配方范围")
+                )
+                if hard_failure:
                     item.setBackground(QColor(255, 199, 206))
                     item.setForeground(QColor(156, 0, 6))
+                elif "较差（仅宽容可用）" in row_text:
+                    item.setBackground(QColor(255, 243, 205))
+                    item.setForeground(QColor(133, 77, 14))
+                elif "优秀（满足超精确）" in row_text:
+                    item.setBackground(QColor(226, 244, 232))
+                    item.setForeground(QColor(25, 107, 58))
                 table.setItem(r, c, item)
         table.resizeColumnsToContents()
 
@@ -3994,14 +4220,15 @@ class MainWindow(QMainWindow):
                     measured = refine_candidate(image.gray, result, self.params, self.config)
                 except Exception as exc:
                     measured = result
-                    measured.shape_params["quality_status"] = "Invalid"
+                    measured.shape_params["quality_hard_failure"] = True
                     measured.shape_params["failure_reason"] = f"精测失败：{self._friendly_error(exc)}"
                     measured.warning = measured.shape_params["failure_reason"]
                     measured = attach_algorithm_path(measured, "Auto")
                 if not (self.params.diameter_min_um <= measured.diameter_um <= self.params.diameter_max_um):
-                    measured.shape_params["quality_status"] = "Invalid"
+                    measured.shape_params["quality_hard_failure"] = True
                     measured.shape_params["failure_reason"] = "尺寸超出配方范围"
                     measured.warning = "尺寸超出配方范围"
+                annotate_detection_quality(measured, self.config)
                 detected[label] = {result.layer: measured}
                 QApplication.processEvents()
 
@@ -4475,6 +4702,7 @@ class MainWindow(QMainWindow):
                 self.caliper_width_spin,
                 self.search_direction_combo,
                 self.target_edge_combo,
+                self.diameter_mode_combo,
                 self.inner_ratio_spin,
                 self.roi_angle_spin,
             )
@@ -4490,6 +4718,7 @@ class MainWindow(QMainWindow):
             self.caliper_width_spin.setValue(float(getattr(roi, "caliper_width_px", 8.0)))
             self._set_combo_value(self.search_direction_combo, getattr(roi, "search_direction", "Inner to Outer"))
             self._set_combo_value(self.target_edge_combo, getattr(roi, "target_edge", "All Edges"))
+            self._set_combo_value(self.diameter_mode_combo, getattr(roi, "diameter_mode", "Average"))
             self.inner_ratio_spin.setValue(float(getattr(roi, "inner_ratio", 0.60)))
             self.roi_angle_spin.setValue(float(getattr(roi, "angle_deg", 0.0)))
             for widget in widgets:
@@ -4564,6 +4793,8 @@ class MainWindow(QMainWindow):
         """
         mark_id = self.mark_combo.currentText() or self._current_mark_id()
         if not mark_id:
+            if show_message:
+                QMessageBox.warning(self, "分析 ROI 区域", "当前没有可分析的 Mark。")
             return 0
         mark = self.marks[mark_id]
         layers_to_analyze = []
@@ -4575,18 +4806,39 @@ class MainWindow(QMainWindow):
         if not layers_to_analyze:
             if show_message:
                 QMessageBox.warning(self, "分析 ROI 区域", "当前 Mark 没有可分析的 ROI 区域。请先导入图像并框选 ROI。")
+            self._append_log(f"{mark_id} 分析 ROI 未开始：缺少图像或 ROI。")
             return 0
 
         analyzed = []
         errors = []
-        self._pull_config_from_ui()
-        for layer in layers_to_analyze:
-            try:
-                det = self._detect_one(mark, layer)
-                self.detections.setdefault(mark_id, {})[layer] = det
-                analyzed.append((layer, det))
-            except Exception as exc:
-                errors.append(f"{LAYER_LABELS.get(layer, layer)}：{self._friendly_error(exc)}")
+        original_button_text = self.analyze_roi_btn.text()
+        self.analyze_roi_btn.setText("正在分析…")
+        self.analyze_roi_btn.setEnabled(False)
+        self.progress_stage_label.setText(f"当前阶段：正在分析 {mark_id} ROI")
+        self._append_log(f"已开始分析 {mark_id} ROI。")
+        QApplication.processEvents()
+        try:
+            self._pull_config_from_ui()
+            for layer in layers_to_analyze:
+                try:
+                    self.progress_stage_label.setText(
+                        f"当前阶段：正在分析 {mark_id} {LAYER_LABELS.get(layer, layer)} ROI"
+                    )
+                    QApplication.processEvents()
+                    det = self._detect_one(mark, layer)
+                    self.detections.setdefault(mark_id, {})[layer] = det
+                    analyzed.append((layer, det))
+                except Exception as exc:
+                    self.runtime_logger.exception(
+                        "ROI analysis failed: mark=%s layer=%s", mark_id, layer
+                    )
+                    errors.append(f"{LAYER_LABELS.get(layer, layer)}：{self._friendly_error(exc)}")
+        except Exception as exc:
+            self.runtime_logger.exception("ROI analysis setup failed: mark=%s", mark_id)
+            errors.append(f"分析准备失败：{self._friendly_error(exc)}")
+        finally:
+            self.analyze_roi_btn.setText(original_button_text)
+            self.analyze_roi_btn.setEnabled(True)
 
         if mark_id in self.overlays:
             del self.overlays[mark_id]
@@ -4606,9 +4858,24 @@ class MainWindow(QMainWindow):
                 if errors:
                     lines.append("\n以下 ROI 未完成：")
                     lines.extend(errors)
-                QMessageBox.information(self, "ROI 区域分析完成", "\n".join(lines))
+                    QMessageBox.warning(self, "ROI 区域部分完成", "\n".join(lines))
+                else:
+                    QMessageBox.information(self, "ROI 区域分析完成", "\n".join(lines))
             else:
-                QMessageBox.warning(self, "分析 ROI 区域", "ROI 区域分析失败：\n" + "\n".join(errors))
+                QMessageBox.critical(
+                    self,
+                    "ROI 区域分析失败",
+                    "没有生成任何识别结果。\n\n" + "\n\n".join(errors),
+                )
+        if analyzed and not errors:
+            self.progress_stage_label.setText(f"当前阶段：{mark_id} ROI 分析完成")
+            self._append_log(f"{mark_id} ROI 分析完成，共完成 {len(analyzed)} 个区域。")
+        elif analyzed:
+            self.progress_stage_label.setText(f"当前阶段：{mark_id} ROI 部分完成")
+            self._append_log(f"{mark_id} ROI 部分完成：{len(analyzed)} 个成功，{len(errors)} 个失败。")
+        else:
+            self.progress_stage_label.setText(f"当前阶段：{mark_id} ROI 分析失败")
+            self._append_log(f"{mark_id} ROI 分析失败，请查看错误提示。")
         return len(analyzed)
 
     def _recipe_roi_usage(self) -> list[str]:

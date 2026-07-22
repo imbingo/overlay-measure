@@ -18,7 +18,7 @@ SAMPLE_DIR = Path(__file__).resolve().parents[1] / "sample_data"
 @pytest.mark.parametrize(
     ("recipe", "upper_image", "lower_image", "upper_mode", "lower_mode", "dx_um", "dy_um", "dxy_um"),
     [
-        ("demo_recipe.json", "sample_upper.png", "sample_lower.png", "Circle", "Ellipse", 0.2417, 0.2528, 0.3498),
+        ("demo_recipe.json", "sample_upper.png", "sample_lower.png", "Circle", "Circle", 0.2417, 0.2528, 0.3498),
         ("demo_square_recipe.json", "sample_square_upper.png", "sample_square_lower.png", "Rectangle", "Rectangle", -2.7998, 2.1995, 3.5604),
         ("demo_mixed_square_circle_recipe.json", "sample_square_upper.png", "sample_lower.png", "Rectangle", "Circle", 5.6555, -5.6398, 7.9870),
         ("demo_annulus_recipe.json", "sample_concentric_single.png", "sample_concentric_single.png", "Circle", "Circle", -5.9855, 2.7836, 6.6011),
