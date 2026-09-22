@@ -218,8 +218,11 @@ class MainWindowRecipeMixin:
                 self.recipe_quick_menu.importRequested.connect(self.import_recipe_file)
                 self.recipe_quick_menu.managerRequested.connect(self.show_recipe_manager)
                 self.recipe_quick_menu.openLibraryRequested.connect(self.open_recipe_library)
+                self.recipe_quick_menu.saveRequested.connect(self.save_recipe_file)
             self.recipe_quick_menu.set_entries(self.recipe_library.scan())
-            self.recipe_quick_menu.set_engineering_access(self.operation_mode == "Engineering")
+            self.recipe_quick_menu.set_engineering_access(
+                self.operation_mode == "Engineering" and not self._calculation_running
+            )
             position = self.load_recipe_btn.mapToGlobal(QPoint(0, self.load_recipe_btn.height() + 4))
             self.recipe_quick_menu.popup(position)
             self.recipe_quick_menu.search_edit.setFocus()

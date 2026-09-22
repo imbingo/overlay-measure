@@ -160,10 +160,6 @@ class MainWindowStateMixin:
             if not hasattr(self, "side_tabs"):
                 return
             engineering = self.operation_mode == "Engineering"
-            self.recipe_manage_btn.setVisible(True)
-            self.save_recipe_btn.setVisible(True)
-            self.recipe_manage_action.setVisible(False)
-            self.save_recipe_action.setVisible(False)
             self.image_mode_label.setVisible(True)
             self.mode_combo.setVisible(True)
             self.display_enhance_check.setVisible(True)
@@ -174,11 +170,10 @@ class MainWindowStateMixin:
             self.side_tabs.setTabEnabled(2, engineering)
             self.side_tabs.setTabEnabled(3, engineering)
             self.side_tabs.setTabEnabled(4, engineering)
-            self.save_recipe_btn.setEnabled(engineering and not self._calculation_running)
             self.upper_canvas.image_drop_enabled = not self._calculation_running
             self.lower_canvas.image_drop_enabled = not self._calculation_running
-            self.recipe_manage_action.setEnabled(engineering and not self._calculation_running)
-            self.save_recipe_action.setEnabled(engineering and not self._calculation_running)
+            if self.recipe_quick_menu is not None:
+                self.recipe_quick_menu.set_engineering_access(engineering and not self._calculation_running)
             if hasattr(self, "image_diagnostics_action"):
                 self.image_diagnostics_action.setEnabled(engineering and not self._calculation_running)
             self.analyze_roi_btn.setEnabled(
@@ -1933,21 +1928,6 @@ class MainWindowStateMixin:
         def reset_canvas_views(self):
             self.upper_canvas.reset_view(update=True)
             self.lower_canvas.reset_view(update=True)
-            self._sync_zoom_level_display()
-
-        def set_canvas_actual_size(self):
-            """Show imported pixels at 1:1 in every visible image view."""
-            canvases = [self.upper_canvas]
-            if self.lower_canvas.isVisible():
-                canvases.append(self.lower_canvas)
-            for canvas in canvases:
-                if canvas.pixmap_cache is None:
-                    continue
-                canvas._update_transform()
-                canvas.user_zoom = float(np.clip(1.0 / max(canvas.fit_scale, 1e-9), 0.05, 80.0))
-                canvas.pan_x = 0.0
-                canvas.pan_y = 0.0
-                canvas.update()
             self._sync_zoom_level_display()
 
         def _sync_zoom_level_display(self):

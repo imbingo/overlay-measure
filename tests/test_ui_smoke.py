@@ -40,12 +40,12 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     assert not window.side_tabs.isTabEnabled(2)
     assert not window.side_tabs.isTabEnabled(3)
     assert not window.change_engineering_password_btn.isEnabled()
-    assert window.recipe_manage_btn.text() == "配方管理"
     assert window.load_recipe_btn.text().startswith("当前配方：未加载")
     window.show_recipe_quick_menu()
     app.processEvents()
     assert window.recipe_quick_menu is not None
     assert window.recipe_quick_menu.tree.columnCount() == 5
+    assert window.recipe_quick_menu.save_btn.text() == "保存当前配方"
     window.recipe_quick_menu.hide()
     assert not window.progress_bar.isHidden()
     assert not window.cancel_progress_btn.isEnabled()

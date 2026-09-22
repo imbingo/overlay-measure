@@ -35,7 +35,7 @@ def test_release_metadata_contains_hash_and_full_installer_policy(tmp_path):
     manifest = tmp_path / "update_manifest.json"
     version_info = tmp_path / "version_info.txt"
 
-    assert version_tuple(__version__) == (2, 4, 2, 0)
+    assert version_tuple(__version__) == (2, 4, 3, 0)
     write_version_info(version_info, __version__)
     write_manifest(manifest, artifact, __version__)
 

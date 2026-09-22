@@ -78,7 +78,7 @@ from .rz_calculator import build_summary_rows
 from .runtime_support import RecoveryStore, build_runtime_logger
 
 from .ui_constants import LAYER_LABELS, RESULT_LABELS, STEP_TITLES
-from .ui_components import ImageDiagnosticsDialog
+from .ui_components import ImageDiagnosticsDialog, ImageViewerDialog
 from .ui_components import (
     CollapsibleSection,
     FramelessTitleBar,
@@ -93,6 +93,25 @@ from .ui_workers import MeasurementWorker, PreviewWorker
 
 
 class MainWindowWorkflowMixin:
+        def open_image_viewer(self):
+            sources = [self.upper_canvas]
+            if self._current_mode() == "Dual Image" and self.lower_canvas.image is not None:
+                sources.append(self.lower_canvas)
+            if not any(canvas.image is not None for canvas in sources):
+                QMessageBox.information(self, "图像查看器", "请先导入图像。")
+                return
+            dialog = getattr(self, "_image_viewer_dialog", None)
+            if dialog is not None and dialog.isVisible():
+                dialog.raise_()
+                dialog.activateWindow()
+                return
+            self._image_viewer_dialog = ImageViewerDialog(sources, self)
+            self._image_viewer_dialog.setAttribute(Qt.WA_DeleteOnClose)
+            self._image_viewer_dialog.destroyed.connect(
+                lambda *_: setattr(self, "_image_viewer_dialog", None)
+            )
+            self._image_viewer_dialog.show()
+
         def refresh_recent_images_menu(self):
             menu = self.recent_images_menu
             menu.clear()
@@ -128,7 +147,7 @@ class MainWindowWorkflowMixin:
             if self._calculation_running:
                 self._append_log("正在计算，请等待结束后导入图像。")
                 return False
-            if self.config.mode != "Dual Image":
+            if self._current_mode() != "Dual Image" and self.config.mode != "Dual Image":
                 layer = "upper"
             mark_id = self._current_mark_id()
             try:
@@ -363,6 +382,7 @@ class MainWindowWorkflowMixin:
             return rows
 
         def on_mode_changed(self, *args):
+            self._pull_config_from_ui()
             self.invalidate_measurement_state("图像模式已切换")
             self._sync_current_mark_images()
             self._refresh_auto_selection_combos()
@@ -1382,19 +1402,16 @@ class MainWindowWorkflowMixin:
                     self.status_task_dot.setStyleSheet("color: #007AFF;")
                     self.status_task_label.setText("任务状态：正在离线计算")
             for button in (
-                self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn, self.recipe_manage_btn,
-                self.save_recipe_btn, self.analyze_all_btn, self.export_btn,
+                self.import_upper_btn, self.import_lower_btn, self.load_recipe_btn, self.analyze_all_btn, self.export_btn,
                 self.analyze_roi_btn, self.auto_detect_btn, self.reset_measurement_btn,
                 self.change_engineering_password_btn, self.import_images_btn, self.more_actions_btn,
-                self.recent_images_btn, self.actual_size_btn,
+                self.recent_images_btn, self.image_viewer_btn,
             ):
                 button.setEnabled(not running)
             self.import_upper_action.setEnabled(not running)
             self.import_lower_action.setEnabled(not running and self._current_mode() == "Dual Image")
             self.reset_measurement_action.setEnabled(not running)
             self.fit_view_action.setEnabled(not running)
-            self.recipe_manage_action.setEnabled(not running and self.operation_mode == "Engineering")
-            self.save_recipe_action.setEnabled(not running and self.operation_mode == "Engineering")
             self.operation_mode_combo.setEnabled(not running)
             self.side_tabs.setEnabled(not running)
             for table_name in ("det_table", "overlay_table", "geometry_table", "repeat_table"):

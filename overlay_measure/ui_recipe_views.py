@@ -79,6 +79,7 @@ class RecipeQuickMenu(QMenu):
     importRequested = Signal()
     managerRequested = Signal()
     openLibraryRequested = Signal()
+    saveRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -122,9 +123,11 @@ class RecipeQuickMenu(QMenu):
         action_row = QHBoxLayout()
         self.import_btn = QPushButton("从文件导入…")
         self.manager_btn = QPushButton("配方管理…")
+        self.save_btn = QPushButton("保存当前配方")
         self.open_library_btn = QPushButton("打开配方库")
         action_row.addWidget(self.import_btn)
         action_row.addWidget(self.manager_btn)
+        action_row.addWidget(self.save_btn)
         action_row.addStretch(1)
         action_row.addWidget(self.open_library_btn)
         layout.addLayout(action_row)
@@ -138,6 +141,7 @@ class RecipeQuickMenu(QMenu):
         self.import_btn.clicked.connect(self._request_import)
         self.manager_btn.clicked.connect(self._request_manager)
         self.open_library_btn.clicked.connect(self._request_open_library)
+        self.save_btn.clicked.connect(self._request_save)
 
     def set_entries(self, entries: list[RecipeLibraryEntry]) -> None:
         self._entries = list(entries)
@@ -147,6 +151,8 @@ class RecipeQuickMenu(QMenu):
     def set_engineering_access(self, enabled: bool) -> None:
         self.import_btn.setEnabled(enabled)
         self.import_btn.setToolTip("" if enabled else "生产模式不能导入或发布配方")
+        self.save_btn.setEnabled(enabled)
+        self.save_btn.setToolTip("" if enabled else "生产模式不能修改或保存配方")
 
     @staticmethod
     def _matches(entry: RecipeLibraryEntry, query: str) -> bool:
@@ -238,6 +244,10 @@ class RecipeQuickMenu(QMenu):
     def _request_open_library(self) -> None:
         self.hide()
         self.openLibraryRequested.emit()
+
+    def _request_save(self) -> None:
+        self.hide()
+        self.saveRequested.emit()
 
 
 class RecipeLibraryDialog(QDialog):
@@ -442,4 +452,3 @@ class RecipeLibraryDialog(QDialog):
             return
         self.selected_recipe_path = path
         self.accept()
-

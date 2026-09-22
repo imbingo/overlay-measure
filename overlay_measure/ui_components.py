@@ -2472,6 +2472,137 @@ class ImageCanvas(QLabel):
             self.update()
 
 
+class ImageViewerDialog(QDialog):
+    """Read-only, resizable image workspace for detailed visual inspection."""
+
+    def __init__(self, source_canvases: list[ImageCanvas], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("图像查看器")
+        self.setMinimumSize(760, 560)
+        self.resize(1240, 820)
+        self._canvases: list[ImageCanvas] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
+
+        toolbar = QHBoxLayout()
+        hint = QLabel("只读查看  ·  滚轮缩放  ·  中键或空格拖动平移  ·  双击适应窗口")
+        hint.setStyleSheet("color: #5F6B7A;")
+        self.zoom_out_btn = QPushButton("−")
+        self.zoom_combo = QComboBox()
+        self.zoom_combo.addItems(["25%", "50%", "75%", "100%", "125%", "150%", "200%", "300%", "400%", "800%"])
+        self.zoom_combo.setCurrentText("100%")
+        self.zoom_in_btn = QPushButton("+")
+        self.fit_btn = QPushButton("适应窗口")
+        self.actual_size_btn = QPushButton("1:1")
+        self.close_btn = QPushButton("关闭")
+        toolbar.addWidget(hint, 1)
+        toolbar.addWidget(self.zoom_out_btn)
+        toolbar.addWidget(self.zoom_combo)
+        toolbar.addWidget(self.zoom_in_btn)
+        toolbar.addWidget(self.fit_btn)
+        toolbar.addWidget(self.actual_size_btn)
+        toolbar.addWidget(self.close_btn)
+        root.addLayout(toolbar)
+
+        self.splitter = QSplitter(Qt.Horizontal)
+        for source in source_canvases:
+            if source.image is None:
+                continue
+            canvas = self._create_canvas_snapshot(source)
+            self._canvases.append(canvas)
+            self.splitter.addWidget(canvas)
+        root.addWidget(self.splitter, 1)
+
+        self.zoom_out_btn.clicked.connect(lambda: self._zoom_by(0.8))
+        self.zoom_in_btn.clicked.connect(lambda: self._zoom_by(1.25))
+        self.zoom_combo.currentTextChanged.connect(self._set_zoom_percent)
+        self.fit_btn.clicked.connect(self._fit_view)
+        self.actual_size_btn.clicked.connect(self._show_actual_pixels)
+        self.close_btn.clicked.connect(self.close)
+
+    @staticmethod
+    def _create_canvas_snapshot(source: ImageCanvas) -> ImageCanvas:
+        canvas = ImageCanvas(source.title, fixed_layer=source.fixed_layer)
+        canvas.setMinimumSize(460, 380)
+        canvas.image_drop_enabled = False
+        canvas.roi_editing_enabled = False
+        canvas.set_image(source.image)
+        canvas.set_display_enhancement(source.display_enhancement)
+        canvas.set_context(
+            source.active_mark_id,
+            source.active_layer,
+            source.marks,
+            source.detections,
+            source.active_roi_type,
+            source.active_roi_inner_ratio,
+            source.active_roi_target_edge,
+            source.active_roi_angle_deg,
+            source.active_ring_half_width_px,
+            source.active_caliper_count,
+            source.active_caliper_width_px,
+            source.active_search_direction,
+            source.active_diameter_mode,
+            auto_detections=source.auto_detections,
+            show_auto_detections=source.show_auto_detections,
+            manual_labels=source.manual_labels,
+            auto_reference_label=source.auto_reference_label,
+            auto_target_label=source.auto_target_label,
+            pixel_size_x_um=source.pixel_size_x_um,
+            pixel_size_y_um=source.pixel_size_y_um,
+            show_diagnostics=source.show_diagnostics,
+            roi_detections=source.roi_detections,
+            active_roi_id=source.active_roi_id,
+        )
+        canvas.set_geometry_context(source.geometry_program, source.geometry_result)
+        return canvas
+
+    def _zoom_by(self, factor: float) -> None:
+        for canvas in self._canvases:
+            canvas.zoom_by(factor)
+        self._sync_zoom_text()
+
+    def _set_zoom_percent(self, text: str) -> None:
+        if not text.endswith("%"):
+            return
+        try:
+            zoom = float(text[:-1]) / 100.0
+        except ValueError:
+            return
+        for canvas in self._canvases:
+            canvas.user_zoom = float(np.clip(zoom, 0.05, 80.0))
+            canvas.pan_x = 0.0
+            canvas.pan_y = 0.0
+            canvas.update()
+
+    def _fit_view(self) -> None:
+        for canvas in self._canvases:
+            canvas.reset_view(update=True)
+        self._sync_zoom_text()
+
+    def _show_actual_pixels(self) -> None:
+        for canvas in self._canvases:
+            if canvas.pixmap_cache is None:
+                continue
+            canvas._update_transform()
+            canvas.user_zoom = float(np.clip(1.0 / max(canvas.fit_scale, 1e-9), 0.05, 80.0))
+            canvas.pan_x = 0.0
+            canvas.pan_y = 0.0
+            canvas.update()
+        self._sync_zoom_text()
+
+    def _sync_zoom_text(self) -> None:
+        if not self._canvases:
+            return
+        text = f"{int(round(self._canvases[0].user_zoom * 100.0))}%"
+        self.zoom_combo.blockSignals(True)
+        if self.zoom_combo.findText(text) < 0:
+            self.zoom_combo.addItem(text)
+        self.zoom_combo.setCurrentText(text)
+        self.zoom_combo.blockSignals(False)
+
+
 class RepeatabilityPlot(QWidget):
     """Lightweight repeatability trend plot without extra plotting dependencies."""
 

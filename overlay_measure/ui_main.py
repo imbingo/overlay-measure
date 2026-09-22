@@ -414,7 +414,6 @@ class MainWindow(
         labels = {
             self.import_upper_btn: "导入上层" if compact else "导入上层/单图",
             self.import_lower_btn: "导入下层" if compact else "导入下层图像",
-            self.save_recipe_btn: "保存配方",
             self.analyze_all_btn: "运行" if compact else "运行测量程序",
             self.export_btn: "导出" if compact else "导出结果",
         }
