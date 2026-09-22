@@ -93,13 +93,6 @@ from .ui_workers import MeasurementWorker, PreviewWorker
 
 
 class MainWindowWorkflowMixin:
-        def on_magnifier_toggled(self, enabled: bool):
-            self.upper_canvas.set_magnifier_enabled(enabled)
-            self.lower_canvas.set_magnifier_enabled(enabled)
-            self.show_canvas_interaction_message(
-                "局部放大镜已开启：移动鼠标查看局部 3 倍图像。" if enabled else "局部放大镜已关闭。"
-            )
-
         def refresh_recent_images_menu(self):
             menu = self.recent_images_menu
             menu.clear()
@@ -1393,7 +1386,7 @@ class MainWindowWorkflowMixin:
                 self.save_recipe_btn, self.analyze_all_btn, self.export_btn,
                 self.analyze_roi_btn, self.auto_detect_btn, self.reset_measurement_btn,
                 self.change_engineering_password_btn, self.import_images_btn, self.more_actions_btn,
-                self.recent_images_btn, self.magnifier_btn,
+                self.recent_images_btn, self.actual_size_btn,
             ):
                 button.setEnabled(not running)
             self.import_upper_action.setEnabled(not running)

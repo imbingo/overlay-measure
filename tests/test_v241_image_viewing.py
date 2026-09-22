@@ -4,6 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
 from overlay_measure.recent_image_store import RecentImageStore
@@ -21,15 +22,13 @@ def test_recent_image_store_persists_layer_and_filters_missing_paths(tmp_path):
     assert store.entries() == []
 
 
-def test_magnifier_toggle_updates_both_canvases():
+def test_actual_pixel_zoom_updates_visible_image_view():
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
     window.show()
-    window.magnifier_btn.setChecked(True)
-    assert window.upper_canvas.magnifier_enabled
-    assert window.lower_canvas.magnifier_enabled
-    window.magnifier_btn.setChecked(False)
-    assert not window.upper_canvas.magnifier_enabled
-    assert not window.lower_canvas.magnifier_enabled
+    window.upper_canvas.fit_scale = 0.25
+    window.upper_canvas.pixmap_cache = QPixmap(100, 100)
+    window.set_canvas_actual_size()
+    assert abs(window.upper_canvas.user_zoom * window.upper_canvas.fit_scale - 1.0) < 1e-9
     window.close()
     app.processEvents()

@@ -1935,6 +1935,21 @@ class MainWindowStateMixin:
             self.lower_canvas.reset_view(update=True)
             self._sync_zoom_level_display()
 
+        def set_canvas_actual_size(self):
+            """Show imported pixels at 1:1 in every visible image view."""
+            canvases = [self.upper_canvas]
+            if self.lower_canvas.isVisible():
+                canvases.append(self.lower_canvas)
+            for canvas in canvases:
+                if canvas.pixmap_cache is None:
+                    continue
+                canvas._update_transform()
+                canvas.user_zoom = float(np.clip(1.0 / max(canvas.fit_scale, 1e-9), 0.05, 80.0))
+                canvas.pan_x = 0.0
+                canvas.pan_y = 0.0
+                canvas.update()
+            self._sync_zoom_level_display()
+
         def _sync_zoom_level_display(self):
             if not hasattr(self, "zoom_level_combo"):
                 return

@@ -124,8 +124,8 @@ class MainWindowBuilderMixin:
                 QToolButton#commandMore { background: #FFFFFF; border: 1px solid #D6DCE4; border-radius: 6px; padding: 6px 9px; }
                 QToolButton#commandMore:hover { background: #F7F9FB; border-color: #B9C2CE; }
                 QPushButton#statusCancelButton { background: #FFFFFF; border: 1px solid #D6DCE4; border-radius: 5px; padding: 2px 9px; min-height: 0; font-size: 11px; }
-                QPushButton#titleAction { border: none; background: transparent; padding: 5px 10px; min-height: 22px; }
-                QPushButton#titleAction:hover { background: #F2F5F8; }
+                QPushButton#titleAction, QToolButton#titleAction { border: none; background: transparent; padding: 5px 10px; min-height: 22px; }
+                QPushButton#titleAction:hover, QToolButton#titleAction:hover { background: #F2F5F8; }
                 QPushButton#recipeSwitcher { background: #F7F9FB; border: 1px solid #DCE2E9; border-radius: 7px; padding: 6px 12px; text-align: left; min-width: 190px; }
                 QPushButton#recipeSwitcher:hover { background: #EEF5FC; border-color: #B9D2EB; }
                 QComboBox#accessMode { background: #F1F7F3; color: #248A3D; border: 1px solid #CDE6D4; font-weight: 600; min-width: 94px; }
@@ -193,6 +193,15 @@ class MainWindowBuilderMixin:
             self.import_upper_btn = QPushButton("导入上层/单图")
             self.import_lower_btn = QPushButton("导入下层图像")
             self.load_recipe_btn = QPushButton("当前配方：未加载  ▾")
+            self.recent_images_btn = QToolButton()
+            self.recent_images_btn.setText("最近文件")
+            self.recent_images_btn.setObjectName("titleAction")
+            self.recent_images_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            self.recent_images_btn.setPopupMode(QToolButton.InstantPopup)
+            self.recent_images_btn.setToolTip("快速重新导入最近使用的上层、下层或单图文件")
+            self.recent_images_menu = QMenu(self.recent_images_btn)
+            self.recent_images_menu.aboutToShow.connect(self.refresh_recent_images_menu)
+            self.recent_images_btn.setMenu(self.recent_images_menu)
             self.recipe_manage_btn = QPushButton("配方管理")
             self.save_recipe_btn = QPushButton("保存配方")
             self.analyze_all_btn = QPushButton("运行测量程序")
@@ -206,7 +215,7 @@ class MainWindowBuilderMixin:
             self.load_recipe_btn.setMinimumWidth(225)
             self.load_recipe_btn.setMaximumWidth(320)
             toolbar.addLayout(title_row, stretch=1)
-            for btn in (self.load_recipe_btn, self.recipe_manage_btn, self.save_recipe_btn):
+            for btn in (self.load_recipe_btn, self.recent_images_btn, self.recipe_manage_btn, self.save_recipe_btn):
                 toolbar.addWidget(btn)
             toolbar.addSpacing(10)
             self.minimize_btn = QPushButton("—")
@@ -245,16 +254,15 @@ class MainWindowBuilderMixin:
             self.zoom_out_btn = QPushButton("−")
             self.zoom_out_btn.setObjectName("zoomButton")
             self.zoom_level_combo = QComboBox()
-            self.zoom_level_combo.addItems(["50%", "75%", "100%", "125%", "150%", "200%"])
+            self.zoom_level_combo.addItems(["25%", "50%", "75%", "100%", "125%", "150%", "200%", "300%", "400%", "800%"])
             self.zoom_level_combo.setCurrentText("100%")
             self.zoom_level_combo.setMinimumWidth(78)
             self.zoom_in_btn = QPushButton("+")
             self.zoom_in_btn.setObjectName("zoomButton")
             self.reset_view_btn = QPushButton("□")
             self.reset_view_btn.setToolTip("适应窗口")
-            self.magnifier_btn = QPushButton("放大镜")
-            self.magnifier_btn.setCheckable(True)
-            self.magnifier_btn.setToolTip("在图像上移动鼠标查看局部 3 倍放大")
+            self.actual_size_btn = QPushButton("1:1")
+            self.actual_size_btn.setToolTip("按图像原始像素大小显示；滚轮缩放，中键或空格拖动平移")
             self.analyze_roi_btn = QPushButton("分析 ROI")
             self.analyze_current_btn = QPushButton("计算当前对位")
             self.analyze_current_btn.setVisible(False)
@@ -271,15 +279,6 @@ class MainWindowBuilderMixin:
             self.import_upper_action = self.import_images_menu.addAction("导入上层/单图")
             self.import_lower_action = self.import_images_menu.addAction("导入下层图像")
             self.import_images_btn.setMenu(self.import_images_menu)
-
-            self.recent_images_btn = QToolButton()
-            self.recent_images_btn.setText("最近文件")
-            self.recent_images_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-            self.recent_images_btn.setPopupMode(QToolButton.InstantPopup)
-            self.recent_images_btn.setToolTip("快速重新导入最近使用的上层、下层或单图文件")
-            self.recent_images_menu = QMenu(self.recent_images_btn)
-            self.recent_images_menu.aboutToShow.connect(self.refresh_recent_images_menu)
-            self.recent_images_btn.setMenu(self.recent_images_menu)
 
             self.more_actions_btn = QToolButton()
             self.more_actions_btn.setText("更多")
@@ -303,14 +302,13 @@ class MainWindowBuilderMixin:
             command_layout.addWidget(self.display_enhance_check)
             command_layout.addWidget(self.import_upper_btn)
             command_layout.addWidget(self.import_lower_btn)
-            command_layout.addWidget(self.recent_images_btn)
             command_layout.addWidget(self.reset_measurement_btn)
             command_layout.addSpacing(10)
             command_layout.addWidget(self.zoom_out_btn)
             command_layout.addWidget(self.zoom_level_combo)
             command_layout.addWidget(self.zoom_in_btn)
             command_layout.addWidget(self.reset_view_btn)
-            command_layout.addWidget(self.magnifier_btn)
+            command_layout.addWidget(self.actual_size_btn)
             command_layout.addStretch(1)
             command_layout.addWidget(self.analyze_roi_btn)
             command_layout.addWidget(self.analyze_all_btn)
@@ -1076,7 +1074,7 @@ class MainWindowBuilderMixin:
             self.zoom_out_btn.clicked.connect(lambda: self.zoom_canvases(0.8))
             self.zoom_level_combo.currentTextChanged.connect(self.set_canvas_zoom_percent)
             self.reset_view_btn.clicked.connect(self.reset_canvas_views)
-            self.magnifier_btn.toggled.connect(self.on_magnifier_toggled)
+            self.actual_size_btn.clicked.connect(self.set_canvas_actual_size)
             self.mark_combo.currentTextChanged.connect(self.on_active_roi_selection_changed)
             self.layer_combo.currentTextChanged.connect(self.on_active_roi_selection_changed)
             self.roi_index_combo.currentIndexChanged.connect(self.on_roi_index_changed)
