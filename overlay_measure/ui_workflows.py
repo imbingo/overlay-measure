@@ -93,6 +93,70 @@ from .ui_workers import MeasurementWorker, PreviewWorker
 
 
 class MainWindowWorkflowMixin:
+        def on_magnifier_toggled(self, enabled: bool):
+            self.upper_canvas.set_magnifier_enabled(enabled)
+            self.lower_canvas.set_magnifier_enabled(enabled)
+            self.show_canvas_interaction_message(
+                "局部放大镜已开启：移动鼠标查看局部 3 倍图像。" if enabled else "局部放大镜已关闭。"
+            )
+
+        def refresh_recent_images_menu(self):
+            menu = self.recent_images_menu
+            menu.clear()
+            entries = self.recent_image_store.entries(existing_only=True)
+            if not entries:
+                empty = menu.addAction("暂无可用最近文件")
+                empty.setEnabled(False)
+                return
+            for entry in entries:
+                path = Path(str(entry["path"]))
+                layer = str(entry.get("layer", "upper"))
+                layer_name = "下层" if layer == "lower" else "上层/单图"
+                action = menu.addAction(f"{layer_name}  ·  {path.parent.name} / {path.name}")
+                action.setToolTip(str(path))
+                action.triggered.connect(
+                    lambda checked=False, p=str(path), target_layer=layer: self.import_recent_image(p, target_layer)
+                )
+            menu.addSeparator()
+            clear_action = menu.addAction("清除最近文件记录")
+            clear_action.triggered.connect(self.clear_recent_images)
+
+        def clear_recent_images(self):
+            self.recent_image_store.clear()
+            self.show_canvas_interaction_message("已清除最近文件记录。")
+
+        def import_recent_image(self, path: str, layer: str):
+            if not Path(path).is_file():
+                self.show_canvas_interaction_message("最近文件已不存在，已跳过。")
+                return
+            self._import_image_path(path, layer, "已从最近文件导入")
+
+        def _import_image_path(self, path: str, layer: str, success_prefix: str) -> bool:
+            if self._calculation_running:
+                self._append_log("正在计算，请等待结束后导入图像。")
+                return False
+            if self.config.mode != "Dual Image":
+                layer = "upper"
+            mark_id = self._current_mark_id()
+            try:
+                image = load_image(path)
+                self._ensure_mark_runtime(mark_id)
+                self._switch_to_single_measurement_after_top_import()
+                self._set_image_for_layer(mark_id, layer, image, "single")
+                self._invalidate_image_dependent_results(mark_id, layer)
+                self.recent_image_store.add(path, layer)
+                self._sync_current_mark_images()
+                self._refresh_auto_selection_combos()
+                layer_name = "上层/单图" if layer == "upper" else "下层"
+                self._append_log(f"{success_prefix}{layer_name}：{Path(path).name}")
+                return True
+            except Exception as exc:
+                self._append_log(f"导入图像失败：{exc}")
+                QMessageBox.critical(self, "导入失败", str(exc))
+                return False
+            finally:
+                self._refresh_all_widgets()
+
         def _diagnostic_canvas(self):
             if self._current_mode() == "Dual Image" and self._current_layer() == "lower":
                 return self.lower_canvas
@@ -843,24 +907,7 @@ class MainWindowWorkflowMixin:
             return self._start_measurement_job()
 
         def import_dropped_image(self, path: str, layer: str):
-            if self._calculation_running:
-                self._append_log("正在计算，请等待结束后导入图像。")
-                return
-            if self.config.mode != "Dual Image":
-                layer = "upper"
-            mark_id = self._current_mark_id()
-            try:
-                image = load_image(path)
-                self._ensure_mark_runtime(mark_id)
-                self._switch_to_single_measurement_after_top_import()
-                self._set_image_for_layer(mark_id, layer, image, "single")
-                self._invalidate_image_dependent_results(mark_id, layer)
-                self._sync_current_mark_images()
-                self._refresh_auto_selection_combos()
-                self._append_log(f"已拖入{'上层/单图' if layer == 'upper' else '下层'}：{Path(path).name}")
-            except Exception as exc:
-                QMessageBox.critical(self, "导入失败", str(exc))
-            self._refresh_all_widgets()
+            self._import_image_path(path, layer, "已拖入")
 
         def import_upper_image(self):
             mark_id = self._current_mark_id()
@@ -873,18 +920,7 @@ class MainWindowWorkflowMixin:
             if not path:
                 self._append_log("取消导入上层/单图。")
                 return
-            try:
-                self._ensure_mark_runtime(mark_id)
-                self._switch_to_single_measurement_after_top_import()
-                self._set_image_for_layer(mark_id, "upper", load_image(path), "single")
-                self._invalidate_image_dependent_results(mark_id, "upper")
-                self._sync_current_mark_images()
-                self._refresh_auto_selection_combos()
-                self._append_log(f"已导入上层/单图：{Path(path).name}")
-            except Exception as exc:
-                self._append_log(f"导入上层/单图失败：{exc}")
-                QMessageBox.critical(self, "导入失败", str(exc))
-            self._refresh_all_widgets()
+            self._import_image_path(path, "upper", "已导入")
 
         def import_lower_image(self):
             mark_id = self._current_mark_id()
@@ -897,18 +933,7 @@ class MainWindowWorkflowMixin:
             if not path:
                 self._append_log("取消导入下层图像。")
                 return
-            try:
-                self._ensure_mark_runtime(mark_id)
-                self._switch_to_single_measurement_after_top_import()
-                self._set_image_for_layer(mark_id, "lower", load_image(path), "single")
-                self._invalidate_image_dependent_results(mark_id, "lower")
-                self._sync_current_mark_images()
-                self._refresh_auto_selection_combos()
-                self._append_log(f"已导入下层图像：{Path(path).name}")
-            except Exception as exc:
-                self._append_log(f"导入下层图像失败：{exc}")
-                QMessageBox.critical(self, "导入失败", str(exc))
-            self._refresh_all_widgets()
+            self._import_image_path(path, "lower", "已导入")
 
         def add_mark(self):
             self.marks = {
@@ -1368,6 +1393,7 @@ class MainWindowWorkflowMixin:
                 self.save_recipe_btn, self.analyze_all_btn, self.export_btn,
                 self.analyze_roi_btn, self.auto_detect_btn, self.reset_measurement_btn,
                 self.change_engineering_password_btn, self.import_images_btn, self.more_actions_btn,
+                self.recent_images_btn, self.magnifier_btn,
             ):
                 button.setEnabled(not running)
             self.import_upper_action.setEnabled(not running)

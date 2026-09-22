@@ -343,6 +343,9 @@ class ImageCanvas(QLabel):
         self.profile_start_img = None
         self.profile_current_img = None
         self.profile_dragging = False
+        self.magnifier_enabled = False
+        self.magnifier_hover_pos = None
+        self.magnifier_zoom = 3.0
         self.pan_start_pos: Optional[QPoint] = None
         self.pan_start_x = 0.0
         self.pan_start_y = 0.0
@@ -412,6 +415,12 @@ class ImageCanvas(QLabel):
             self.profile_start_img = None
             self.profile_current_img = None
         self.setCursor(Qt.CrossCursor if enabled else Qt.ArrowCursor)
+        self.update()
+
+    def set_magnifier_enabled(self, enabled: bool):
+        self.magnifier_enabled = bool(enabled)
+        if not enabled:
+            self.magnifier_hover_pos = None
         self.update()
 
     def _emit_profile(self):
@@ -1554,6 +1563,32 @@ class ImageCanvas(QLabel):
 
         self._draw_overlays(painter)
         self._draw_geometry_overlays(painter)
+        if self.magnifier_enabled and self.magnifier_hover_pos is not None:
+            point = self.widget_to_image_float(self.magnifier_hover_pos)
+            if point is not None:
+                lens_radius = 72.0
+                source_half = lens_radius / max(self.scale * self.magnifier_zoom, 1e-9)
+                source = QRectF(point[0] - source_half, point[1] - source_half, 2.0 * source_half, 2.0 * source_half)
+                target = QRectF(
+                    self.magnifier_hover_pos.x() - lens_radius,
+                    self.magnifier_hover_pos.y() - lens_radius,
+                    2.0 * lens_radius,
+                    2.0 * lens_radius,
+                )
+                clip = QPainterPath()
+                clip.addEllipse(target)
+                painter.save()
+                painter.setClipPath(clip)
+                painter.drawPixmap(target, self.pixmap_cache, source)
+                painter.restore()
+                lens_pen = QPen(QColor("#00D4FF"), 2.0)
+                lens_pen.setCosmetic(True)
+                painter.setPen(lens_pen)
+                painter.drawEllipse(target)
+                painter.drawLine(int(target.center().x() - 9), int(target.center().y()), int(target.center().x() + 9), int(target.center().y()))
+                painter.drawLine(int(target.center().x()), int(target.center().y() - 9), int(target.center().x()), int(target.center().y() + 9))
+                painter.setPen(QColor("#00D4FF"))
+                painter.drawText(int(target.left()), int(target.top() - 6), f"局部 {self.magnifier_zoom:.1f}×")
         if self.profile_capture_enabled and self.profile_start_img is not None:
             start_x, start_y = self.image_to_widget(*self.profile_start_img)
             end = self.profile_current_img or self.profile_start_img
@@ -2330,6 +2365,9 @@ class ImageCanvas(QLabel):
                 self.update()
 
     def mouseMoveEvent(self, event):
+        if self.magnifier_enabled and not self.is_panning:
+            self.magnifier_hover_pos = event.position().toPoint()
+            self.update()
         if self.is_panning and self.pan_start_pos is not None:
             pos = event.position().toPoint()
             self.pan_x = self.pan_start_x + (pos.x() - self.pan_start_pos.x())

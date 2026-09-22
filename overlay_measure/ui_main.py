@@ -68,6 +68,7 @@ from .quality_profiles import (
 )
 from .recipe_manager import load_recipe, load_recipe_with_geometry, save_recipe
 from .recipe_library import RecipeLibrary, RecipeLibraryEntry
+from .recent_image_store import RecentImageStore
 from .recipe_integrity import seal_recipe, verify_recipe
 from .result_exporter import build_detection_rows, export_results
 from .rz_calculator import build_summary_rows
@@ -96,25 +97,6 @@ from .ui_geometry import MainWindowGeometryMixin
 def application_icon_path() -> Path:
     runtime_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
     return runtime_root / "assets" / "overlay_measure_icon.png"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 class MainWindow(
@@ -194,6 +176,7 @@ class MainWindow(
         self.loaded_recipe_hash = ""
         self.recipe_integrity_status = "Unsealed"
         self.recipe_library = RecipeLibrary()
+        self.recent_image_store = RecentImageStore()
         self.recipe_quick_menu: Optional[RecipeQuickMenu] = None
         self.access_controller = AccessController()
         self.operation_mode = "Production"
