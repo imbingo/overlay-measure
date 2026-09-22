@@ -179,10 +179,14 @@ class MainWindowStateMixin:
             self.lower_canvas.image_drop_enabled = not self._calculation_running
             self.recipe_manage_action.setEnabled(engineering and not self._calculation_running)
             self.save_recipe_action.setEnabled(engineering and not self._calculation_running)
+            if hasattr(self, "image_diagnostics_action"):
+                self.image_diagnostics_action.setEnabled(engineering and not self._calculation_running)
             self.analyze_roi_btn.setEnabled(
                 not self._calculation_running and not self._is_auto_workflow()
             )
             self.diagnostic_check.setEnabled(engineering)
+            if hasattr(self, "image_diagnostics_btn"):
+                self.image_diagnostics_btn.setEnabled(engineering and not self._calculation_running)
             self.change_engineering_password_btn.setEnabled(engineering and not self._calculation_running)
             for widget in (
                 self.material_code_edit,
@@ -406,6 +410,7 @@ class MainWindowStateMixin:
             self.params.min_edge_points = self.min_edge_points_spin.value()
             self.params.polarity = self._combo_value(self.polarity_combo)
             self.params.measurement_timeout_s = self.measurement_timeout_spin.value()
+            self.params.auto_refine_roi_type = self._combo_value(self.roi_type_combo)
 
         def _push_config_to_ui(self):
             self._set_mode_ui(self.config.mode)
@@ -463,6 +468,11 @@ class MainWindowStateMixin:
             self.min_edge_points_spin.setValue(self.params.min_edge_points)
             self._set_combo_value(self.polarity_combo, self.params.polarity)
             self.measurement_timeout_spin.setValue(getattr(self.params, "measurement_timeout_s", 180))
+            if hasattr(self, "roi_type_combo"):
+                self._set_combo_value(
+                    self.roi_type_combo,
+                    getattr(self.params, "auto_refine_roi_type", "Caliper Circle"),
+                )
             self._set_combo_value(self.auto_reference_combo, getattr(self.config, "auto_reference_label", ""))
             self._set_combo_value(self.auto_target_combo, getattr(self.config, "auto_target_label", ""))
 
@@ -1108,8 +1118,9 @@ class MainWindowStateMixin:
             roi_diameter_mode = self._combo_value(self.diameter_mode_combo) if hasattr(self, "diameter_mode_combo") else "Average"
             show_auto = self._is_auto_workflow()
             if hasattr(self, "workflow_explanation_label"):
+                auto_roi_name = self.roi_type_combo.currentText() if hasattr(self, "roi_type_combo") else "卡尺圆"
                 self.workflow_explanation_label.setText(
-                    "全图自动识别：本次计算不会读取任何 ROI。"
+                    f"全图自动识别：候选精测按当前 ROI 类型“{auto_roi_name}”执行。"
                     if show_auto
                     else "手动 ROI 测量：使用各 Mark、各层当前显示的 ROI；配方 ROI 会在计算前确认。"
                 )

@@ -78,6 +78,7 @@ from .rz_calculator import build_summary_rows
 from .runtime_support import RecoveryStore, build_runtime_logger
 
 from .ui_constants import LAYER_LABELS, RESULT_LABELS, STEP_TITLES
+from .ui_components import ImageDiagnosticsDialog
 from .ui_components import (
     CollapsibleSection,
     FramelessTitleBar,
@@ -92,6 +93,43 @@ from .ui_workers import MeasurementWorker, PreviewWorker
 
 
 class MainWindowWorkflowMixin:
+        def _diagnostic_canvas(self):
+            if self._current_mode() == "Dual Image" and self._current_layer() == "lower":
+                return self.lower_canvas
+            return self.upper_canvas
+
+        def start_image_diagnostics(self):
+            if self.operation_mode != "Engineering":
+                QMessageBox.information(self, "图像诊断", "图像诊断仅在工程模式下可用。")
+                return
+            canvas = self._diagnostic_canvas()
+            if canvas.image is None:
+                QMessageBox.information(self, "图像诊断", "请先导入当前层图像。")
+                return
+            dialog = getattr(self, "_image_diagnostics_dialog", None)
+            if dialog is None:
+                dialog = ImageDiagnosticsDialog(self)
+                dialog.finished.connect(lambda *_: self._stop_image_diagnostics())
+                self._image_diagnostics_dialog = dialog
+            self.upper_canvas.set_profile_capture_enabled(canvas is self.upper_canvas)
+            self.lower_canvas.set_profile_capture_enabled(canvas is self.lower_canvas)
+            dialog.instruction_label.setText(
+                f"当前：{canvas.title}。在图像上拖动一条线；使用原始灰度，不受显示增强影响。"
+            )
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            self.show_canvas_interaction_message("图像诊断已开启：在图像上拖动一条线查看灰度剖面。")
+
+        def _stop_image_diagnostics(self):
+            self.upper_canvas.set_profile_capture_enabled(False)
+            self.lower_canvas.set_profile_capture_enabled(False)
+
+        def receive_image_profile(self, payload: dict):
+            dialog = getattr(self, "_image_diagnostics_dialog", None)
+            if dialog is not None:
+                dialog.set_profile(payload)
+
         def _crop_roi_image(self, image: Optional[ImageData], roi: Optional[Roi], path: Path):
             if image is None or roi is None:
                 return False

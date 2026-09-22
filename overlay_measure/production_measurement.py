@@ -16,7 +16,7 @@ from .measurement_units import (
     rotated_rect_size_um,
     scalar_px_to_um,
 )
-from .models import DetectionParams, DetectionResult, MeasurementConfig, Roi
+from .models import DetectionParams, DetectionResult, ImageData, MeasurementConfig, Roi
 from .quality_profiles import annotate_detection_quality
 from .subpixel_edge_detector import _bilinear_sample
 
@@ -310,8 +310,52 @@ def refine_candidate(
     candidate: DetectionResult,
     params: DetectionParams,
     config: MeasurementConfig,
+    roi_type: str = "Caliper Circle",
 ) -> DetectionResult:
     try:
+        roi_type = str(roi_type or "Caliper Circle")
+        if roi_type not in {"Caliper Circle", "Rectangle"}:
+            # Auto mode only supplies a candidate-centered temporary ROI.  The
+            # actual extraction and fit deliberately reuse the manual ROI path.
+            width = float(candidate.shape_params.get("width_px", candidate.diameter_px))
+            height = float(candidate.shape_params.get("height_px", candidate.diameter_px))
+            margin = max(4.0, float(config.production_search_half_width_px))
+            if roi_type in {"Circle", "Annulus"}:
+                diameter = max(width, height, candidate.diameter_px) + 2.0 * margin
+                width = height = diameter
+            else:
+                width += 2.0 * margin
+                height += 2.0 * margin
+            roi = Roi(
+                candidate.center_x_px - width / 2.0,
+                candidate.center_y_px - height / 2.0,
+                width,
+                height,
+                roi_type,
+                0.60,
+                "Strongest Edge",
+                float(candidate.shape_params.get("angle_deg", 0.0)),
+                int(config.production_caliper_count),
+                float(config.production_caliper_width_px),
+                "Inner to Outer",
+            ).normalized()
+            from .measurement_service import detect_manual_roi
+
+            measured = detect_manual_roi(
+                candidate.mark_id,
+                candidate.layer,
+                ImageData("", gray, "automatic candidate"),
+                roi,
+                params,
+                config,
+            )
+            measured.shape_params.update({
+                "measurement_stage": "automatic_roi_semantic_refine",
+                "roi_type": roi_type,
+                "candidate_mode": candidate.fitting_mode,
+                "candidate_contour_points": candidate.shape_params.get("contour_points", candidate.edge_points),
+            })
+            return attach_algorithm_path(measured, "Auto")
         if candidate.fitting_mode == "AutoRectangle":
             return refine_rectangle_candidate(gray, candidate, params, config)
         return refine_circle_candidate(gray, candidate, params, config)

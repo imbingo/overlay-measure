@@ -113,7 +113,13 @@ def detect_auto_set(
         if progress:
             progress(30.0 + 60.0 * label_index / candidate_count, f"正在精测候选 {label_index + 1}/{len(results_all)}")
         try:
-            measured = refine_candidate(image_map[result.layer].gray, result, params, config)
+            measured = refine_candidate(
+                image_map[result.layer].gray,
+                result,
+                params,
+                config,
+                roi_type=getattr(params, "auto_refine_roi_type", "Caliper Circle"),
+            )
         except Exception as exc:
             measured = result
             measured.shape_params["quality_hard_failure"] = True

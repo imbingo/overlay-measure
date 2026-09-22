@@ -42,6 +42,16 @@ def _point_list(points: np.ndarray) -> list[tuple[float, float]]:
 def _algorithm_path_for_detection(detection: DetectionResult, workflow: str = "Manual") -> str:
     if workflow == "Auto":
         candidate = detection.shape_params.get("candidate_mode", "")
+        if detection.shape_params.get("measurement_stage") == "automatic_roi_semantic_refine":
+            roi_type = detection.shape_params.get("roi_type", "ROI")
+            fit_text = {
+                "Ellipse": "完整闭合边界/亚像素定位 → 椭圆拟合（长短轴/圆度）",
+                "Circle": "完整闭合边界/亚像素定位 → RANSAC圆拟合",
+                "RegionCenter": "区域分割 → 区域中心",
+                "EdgeCenter": "亚像素边缘 → 稳健轮廓中心",
+                "Line": "法向灰度剖面 → Huber直线拟合",
+            }.get(detection.fitting_mode, f"亚像素边缘 → {detection.fitting_mode}拟合")
+            return f"自动识别 → 候选轮廓 → ROI语义({roi_type}) → {fit_text} → 物理尺寸换算"
         if detection.fitting_mode == "ProductionCircle":
             return "自动识别 → Otsu阈值/闭合轮廓候选 → 三点/候选圆初始化 → 径向卡尺精测 → 一致边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算"
         if detection.fitting_mode == "ProductionRectangle":

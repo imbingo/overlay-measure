@@ -208,6 +208,9 @@ class DetectionParams:
     auto_max_contours_per_mask: int = 256
     auto_time_limit_s: float = 12.0
     auto_array_mode: bool = True
+    # Global auto search finds candidates first; this recipe-owned ROI semantic
+    # determines the precise fit used for each candidate.
+    auto_refine_roi_type: str = "Caliper Circle"
 
 
 @dataclass

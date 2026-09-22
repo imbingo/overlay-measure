@@ -162,6 +162,93 @@ class CollapsibleSection(QWidget):
         self.body_layout.addWidget(widget)
 
 
+class GrayProfilePlot(QWidget):
+    """Small dependency-free line-profile chart for engineering diagnostics."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.distances = np.array([], dtype=float)
+        self.values = np.array([], dtype=float)
+        self.setMinimumHeight(235)
+
+    def set_profile(self, distances, values):
+        self.distances = np.asarray(distances, dtype=float)
+        self.values = np.asarray(values, dtype=float)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
+        rect = self.rect().adjusted(50, 18, -18, -36)
+        painter.setPen(QPen(QColor("#D7DCE3"), 1))
+        painter.drawRect(rect)
+        if self.values.size < 2:
+            painter.setPen(QColor("#6B7280"))
+            painter.drawText(rect, Qt.AlignCenter, "在图像上拖动一条线以查看灰度剖面")
+            return
+        lo, hi = float(np.min(self.values)), float(np.max(self.values))
+        if hi - lo < 1e-12:
+            lo -= 0.5
+            hi += 0.5
+        x_max = max(float(self.distances[-1]), 1e-9)
+        path = QPainterPath()
+        for index, (distance, value) in enumerate(zip(self.distances, self.values)):
+            x = rect.left() + rect.width() * float(distance) / x_max
+            y = rect.bottom() - rect.height() * (float(value) - lo) / (hi - lo)
+            if index == 0:
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+        pen = QPen(QColor("#007AFF"), 1.8)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.drawPath(path)
+        painter.setPen(QColor("#4B5563"))
+        painter.setFont(QFont("Microsoft YaHei UI", 8))
+        painter.drawText(4, int(rect.top() + 6), f"{hi:.3f}")
+        painter.drawText(4, int(rect.bottom()), f"{lo:.3f}")
+        painter.drawText(int(rect.left()), self.height() - 10, "0")
+        painter.drawText(int(rect.right() - 54), self.height() - 10, f"{x_max:.2f} μm")
+
+
+class ImageDiagnosticsDialog(QDialog):
+    """Non-destructive grayscale line inspection using the raw imported image."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("图像诊断与边缘分析")
+        self.setMinimumSize(620, 380)
+        layout = QVBoxLayout(self)
+        self.instruction_label = QLabel("在图像上拖动一条线；使用原始灰度，不受显示增强影响。")
+        self.instruction_label.setObjectName("statusCaption")
+        self.stats_label = QLabel("尚未选择剖面线")
+        self.stats_label.setWordWrap(True)
+        self.plot = GrayProfilePlot(self)
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(self.instruction_label)
+        layout.addWidget(self.plot)
+        layout.addWidget(self.stats_label)
+        layout.addWidget(close_btn, alignment=Qt.AlignRight)
+
+    def set_profile(self, payload: dict):
+        values = np.asarray(payload.get("values", []), dtype=float)
+        distances = np.asarray(payload.get("distances_um", []), dtype=float)
+        self.plot.set_profile(distances, values)
+        if values.size:
+            self.stats_label.setText(
+                "长度={length_um:.3f} μm；灰度 最小={minimum:.3f}，最大={maximum:.3f}，"
+                "均值={mean:.3f}，PV={pv:.3f}".format(
+                    length_um=float(distances[-1]) if distances.size else 0.0,
+                    minimum=float(np.min(values)),
+                    maximum=float(np.max(values)),
+                    mean=float(np.mean(values)),
+                    pv=float(np.ptp(values)),
+                )
+            )
+
+
 class ImageCanvas(QLabel):
     imageDropped = Signal(str)
     roiChanged = Signal(str, str, object)  # mark_id, layer, Roi
@@ -172,6 +259,7 @@ class ImageCanvas(QLabel):
     roiSelectionCleared = Signal(str, str)  # mark_id, layer
     roiContextAction = Signal(str, str, str, str)  # mark_id, layer, roi_id, action
     interactionMessage = Signal(str)
+    profileMeasured = Signal(object)
 
     def __init__(self, title: str, fixed_layer: Optional[str] = None, parent=None):
         super().__init__(parent)
@@ -251,6 +339,10 @@ class ImageCanvas(QLabel):
         self.move_start_roi = None
         self.is_panning = False
         self.space_pan_held = False
+        self.profile_capture_enabled = False
+        self.profile_start_img = None
+        self.profile_current_img = None
+        self.profile_dragging = False
         self.pan_start_pos: Optional[QPoint] = None
         self.pan_start_x = 0.0
         self.pan_start_y = 0.0
@@ -312,6 +404,49 @@ class ImageCanvas(QLabel):
         if self.image is not None:
             self.pixmap_cache = self._make_pixmap(self.image)
         self.update()
+
+    def set_profile_capture_enabled(self, enabled: bool):
+        self.profile_capture_enabled = bool(enabled)
+        if not enabled:
+            self.profile_dragging = False
+            self.profile_start_img = None
+            self.profile_current_img = None
+        self.setCursor(Qt.CrossCursor if enabled else Qt.ArrowCursor)
+        self.update()
+
+    def _emit_profile(self):
+        if self.image is None or self.profile_start_img is None or self.profile_current_img is None:
+            return
+        start = np.asarray(self.profile_start_img, dtype=float)
+        end = np.asarray(self.profile_current_img, dtype=float)
+        delta = end - start
+        length_px = float(np.linalg.norm(delta))
+        if length_px < 1.0:
+            self.interactionMessage.emit("剖面线过短，请拖动更长的线段。")
+            return
+        samples = max(2, int(np.ceil(length_px)) + 1)
+        xs = np.linspace(start[0], end[0], samples)
+        ys = np.linspace(start[1], end[1], samples)
+        gray = np.asarray(self.image.gray, dtype=np.float64)
+        x0 = np.clip(np.floor(xs).astype(int), 0, gray.shape[1] - 1)
+        y0 = np.clip(np.floor(ys).astype(int), 0, gray.shape[0] - 1)
+        x1 = np.clip(x0 + 1, 0, gray.shape[1] - 1)
+        y1 = np.clip(y0 + 1, 0, gray.shape[0] - 1)
+        fx = xs - x0
+        fy = ys - y0
+        values = (
+            (1 - fx) * (1 - fy) * gray[y0, x0]
+            + fx * (1 - fy) * gray[y0, x1]
+            + (1 - fx) * fy * gray[y1, x0]
+            + fx * fy * gray[y1, x1]
+        )
+        length_um = float(np.hypot(delta[0] * self.pixel_size_x_um, delta[1] * self.pixel_size_y_um))
+        self.profileMeasured.emit({
+            "start_px": tuple(start),
+            "end_px": tuple(end),
+            "values": values.tolist(),
+            "distances_um": np.linspace(0.0, length_um, samples).tolist(),
+        })
 
     def set_context(
         self,
@@ -1419,6 +1554,16 @@ class ImageCanvas(QLabel):
 
         self._draw_overlays(painter)
         self._draw_geometry_overlays(painter)
+        if self.profile_capture_enabled and self.profile_start_img is not None:
+            start_x, start_y = self.image_to_widget(*self.profile_start_img)
+            end = self.profile_current_img or self.profile_start_img
+            end_x, end_y = self.image_to_widget(*end)
+            profile_pen = QPen(QColor("#00D4FF"), 2.0)
+            profile_pen.setCosmetic(True)
+            painter.setPen(profile_pen)
+            painter.drawLine(int(start_x), int(start_y), int(end_x), int(end_y))
+            painter.drawEllipse(QRectF(start_x - 3, start_y - 3, 6, 6))
+            painter.drawEllipse(QRectF(end_x - 3, end_y - 3, 6, 6))
 
         header_rect = QRectF(8, 8, min(270, self.width() - 16), 48)
         painter.fillRect(header_rect, QColor(18, 21, 26, 185))
@@ -1434,6 +1579,11 @@ class ImageCanvas(QLabel):
             painter.fillRect(hint_rect, QColor(18, 21, 26, 205))
             painter.setPen(QColor("#7EE787"))
             painter.drawText(hint_rect.adjusted(8, 0, -8, 0), Qt.AlignVCenter | Qt.AlignLeft, hint)
+        elif self.profile_capture_enabled:
+            hint_rect = QRectF(12, self.height() - 76, min(360, self.width() - 24), 28)
+            painter.fillRect(hint_rect, QColor(18, 21, 26, 205))
+            painter.setPen(QColor("#00D4FF"))
+            painter.drawText(hint_rect.adjusted(8, 0, -8, 0), Qt.AlignVCenter | Qt.AlignLeft, "图像诊断：拖动剖面线；Esc 退出")
         elif self._has_caliper_result_for_hint():
             hint = (
                 "卡尺调整中 · 点击空白处隐藏"
@@ -1645,6 +1795,43 @@ class ImageCanvas(QLabel):
                 painter.drawPolygon(QPolygonF(points))
         painter.drawText(int(cx + 7), int(cy - 7), label)
 
+    def _draw_ellipse_fit(self, painter: QPainter, detection: DetectionResult, color: QColor, show_axes: bool = True):
+        """Draw the fitted, rotated ellipse in image coordinates and its physical axes."""
+        major = float(detection.shape_params.get("major_px", detection.diameter_px))
+        minor = float(detection.shape_params.get("minor_px", detection.diameter_px))
+        angle = np.deg2rad(float(detection.shape_params.get("angle_deg", 0.0)))
+        ct, st = np.cos(angle), np.sin(angle)
+        points = []
+        for theta in np.linspace(0.0, 2.0 * np.pi, 97):
+            x = detection.center_x_px + 0.5 * major * np.cos(theta) * ct - 0.5 * minor * np.sin(theta) * st
+            y = detection.center_y_px + 0.5 * major * np.cos(theta) * st + 0.5 * minor * np.sin(theta) * ct
+            points.append(QPointF(*self.image_to_widget(x, y)))
+        pen = QPen(color, 2.0)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.drawPolyline(QPolygonF(points))
+        if not show_axes:
+            return
+        cx, cy = self.image_to_widget(detection.center_x_px, detection.center_y_px)
+        major_a = self.image_to_widget(detection.center_x_px - 0.5 * major * ct, detection.center_y_px - 0.5 * major * st)
+        major_b = self.image_to_widget(detection.center_x_px + 0.5 * major * ct, detection.center_y_px + 0.5 * major * st)
+        minor_a = self.image_to_widget(detection.center_x_px + 0.5 * minor * st, detection.center_y_px - 0.5 * minor * ct)
+        minor_b = self.image_to_widget(detection.center_x_px - 0.5 * minor * st, detection.center_y_px + 0.5 * minor * ct)
+        major_pen = QPen(QColor("#34C759"), 1.5)
+        major_pen.setCosmetic(True)
+        painter.setPen(major_pen)
+        painter.drawLine(int(major_a[0]), int(major_a[1]), int(major_b[0]), int(major_b[1]))
+        minor_pen = QPen(QColor("#00D4FF"), 1.5)
+        minor_pen.setCosmetic(True)
+        painter.setPen(minor_pen)
+        painter.drawLine(int(minor_a[0]), int(minor_a[1]), int(minor_b[0]), int(minor_b[1]))
+        major_um = detection.ellipse_major_um or major * self.pixel_size_x_um
+        minor_um = detection.ellipse_minor_um or minor * self.pixel_size_y_um
+        painter.setPen(QColor("#34C759"))
+        painter.drawText(int(cx + 10), int(cy - 25), f"长轴 {major_um:.3f} μm")
+        painter.setPen(QColor("#00D4FF"))
+        painter.drawText(int(cx + 10), int(cy - 8), f"短轴 {minor_um:.3f} μm")
+
     def _draw_overlays(self, painter: QPainter):
         if self.image is None:
             return
@@ -1783,11 +1970,7 @@ class ImageCanvas(QLabel):
                             f"区域中心 W={width:.3f} μm H={height:.3f} μm 面积={area:.0f}px² {polarity}",
                         )
                     elif det.fitting_mode == "Ellipse":
-                        major = det.shape_params.get("major_px", det.diameter_px) * self.scale
-                        minor = det.shape_params.get("minor_px", det.diameter_px) * self.scale
-                        # For V1 display, draw axis-aligned ellipse; angle is reported numerically in table.
-                        painter.setPen(QPen(fit_color, 2.0))
-                        painter.drawEllipse(QRectF(cx - major / 2, cy - minor / 2, major, minor))
+                        self._draw_ellipse_fit(painter, det, fit_color, show_axes=True)
                     elif det.fitting_mode == "Rectangle":
                         # V1.0.4: draw a clearly visible rotated rectangle contour.
                         # Earlier versions calculated the rectangle center, but the outline
@@ -1899,6 +2082,8 @@ class ImageCanvas(QLabel):
                 if detection.fitting_mode == "ProductionCircle":
                     radius = float(detection.shape_params.get("radius_px", detection.diameter_px / 2.0)) * self.scale
                     painter.drawEllipse(QRectF(cx - radius, cy - radius, 2.0 * radius, 2.0 * radius))
+                elif detection.fitting_mode == "Ellipse":
+                    self._draw_ellipse_fit(painter, detection, color, show_axes=True)
                 elif detection.fitting_mode == "ProductionRectangle":
                     width = float(detection.shape_params.get("width_px", detection.diameter_px))
                     height = float(detection.shape_params.get("height_px", detection.diameter_px))
@@ -1949,6 +2134,11 @@ class ImageCanvas(QLabel):
                 )
 
     def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape and self.profile_capture_enabled:
+            self.set_profile_capture_enabled(False)
+            self.interactionMessage.emit("已退出图像诊断剖面选取。")
+            event.accept()
+            return
         if event.key() == Qt.Key_Space and not event.isAutoRepeat():
             self.space_pan_held = True
             if not self.is_panning:
@@ -2059,6 +2249,15 @@ class ImageCanvas(QLabel):
             event.accept()
             return
         if event.button() == Qt.LeftButton:
+            if self.profile_capture_enabled:
+                point = self.widget_to_image_float(event.position().toPoint())
+                if point is not None:
+                    self.profile_start_img = point
+                    self.profile_current_img = point
+                    self.profile_dragging = True
+                    self.update()
+                event.accept()
+                return
             if self.geometry_interaction_active:
                 payload = self._geometry_pick_payload(event.position().toPoint())
                 if payload is not None:
@@ -2145,6 +2344,13 @@ class ImageCanvas(QLabel):
                 self.update()
             event.accept()
             return
+        if self.profile_dragging:
+            point = self.widget_to_image_float(event.position().toPoint())
+            if point is not None:
+                self.profile_current_img = point
+                self.update()
+            event.accept()
+            return
         if self.geometry_interaction_active:
             payload = self._geometry_pick_payload(event.position().toPoint())
             self.geometry_hover_point = payload["point_px"] if payload is not None else None
@@ -2211,6 +2417,15 @@ class ImageCanvas(QLabel):
         self.setToolTip(best or "")
 
     def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.profile_dragging:
+            point = self.widget_to_image_float(event.position().toPoint())
+            if point is not None:
+                self.profile_current_img = point
+            self.profile_dragging = False
+            self._emit_profile()
+            self.update()
+            event.accept()
+            return
         if event.button() in (Qt.LeftButton, Qt.MiddleButton) and self.is_panning:
             self.is_panning = False
             self.pan_start_pos = None
