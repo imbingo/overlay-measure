@@ -1607,7 +1607,12 @@ class ImageCanvas(QLabel):
         painter.drawText(ax0 - 10, ay0 - 48, "Y")
 
     def _draw_secondary_detection(self, painter: QPainter, detection: DetectionResult, label: str):
-        """Draw a compact green result for non-active manual ROIs."""
+        """Draw a cheap summary for non-active manual ROIs.
+
+        Full fitted contours are still available for the selected ROI and in
+        diagnostic mode.  Avoid rebuilding hundreds of QPolygonF objects on
+        every pan/zoom repaint when an array contains many ROIs.
+        """
         color = QColor("#34C759")
         pen = QPen(color, 1.7)
         pen.setCosmetic(True)
@@ -1615,6 +1620,9 @@ class ImageCanvas(QLabel):
         cx, cy = self.image_to_widget(detection.center_x_px, detection.center_y_px)
         painter.drawLine(int(cx - 5), int(cy), int(cx + 5), int(cy))
         painter.drawLine(int(cx), int(cy - 5), int(cx), int(cy + 5))
+        if not self.show_diagnostics:
+            painter.drawText(int(cx + 7), int(cy - 7), label)
+            return
         mode = detection.fitting_mode
         if mode in {"Circle", "EdgeCenter", "CaliperCircle"}:
             radius = float(detection.shape_params.get("radius_px", detection.diameter_px / 2.0)) * self.scale
@@ -2307,4 +2315,3 @@ class RepeatabilityPlot(QWidget):
         painter.setPen(QColor("#6E6E73"))
         painter.drawText(rect.center().x() - 40, self.rect().bottom() - 8, "测量次数")
         painter.end()
-

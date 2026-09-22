@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -179,6 +179,7 @@ def detect_manual_roi(
     roi: Roi,
     params: DetectionParams,
     config: MeasurementConfig,
+    cancelled: Optional[Callable[[], bool]] = None,
 ) -> DetectionResult:
     if getattr(roi, "roi_type", "") == "Approximate Line":
         return attach_algorithm_path(
@@ -288,14 +289,16 @@ def detect_manual_roi(
             expected_shape = "Any"
         edges = detect_primary_contour_edges(image.gray, roi, detect_params, expected_shape)
     else:
-        edges = detect_subpixel_edges(image.gray, roi, detect_params)
+        edges = detect_subpixel_edges(image.gray, roi, detect_params, cancelled)
     if len(edges.points_xy) < detect_params.min_edge_points:
         raise ValueError(
             f"{mark_id} {LAYER_LABELS.get(layer, layer)} 有效边缘点不足："
             f"{len(edges.points_xy)} < {detect_params.min_edge_points}. "
             "可以尝试放大 ROI、降低 Canny/最小梯度，或检查焦面和对比度。"
         )
-    fit = fit_mark_shape(edges.points_xy, detect_params)
+    if cancelled and cancelled():
+        raise InterruptedError("用户取消计算")
+    fit = fit_mark_shape(edges.points_xy, detect_params, cancelled=cancelled)
     used_points = edges.points_xy
     if fit.inlier_mask is not None and len(fit.inlier_mask) == len(edges.points_xy):
         used_points = edges.points_xy[fit.inlier_mask]

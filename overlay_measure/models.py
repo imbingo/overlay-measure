@@ -199,6 +199,15 @@ class DetectionParams:
     diameter_max_um: float = 999999.0
     polarity: str = "Auto"
     measurement_timeout_s: int = 180
+    # Keep manual multi-ROI jobs bounded.  Points are selected evenly along the
+    # detected edge, rather than taking the first pixels in scan order.
+    max_edge_points: int = 2000
+    # Auto mode used to have several silent, fixed limits (32/48/96/4 s).
+    # These defaults are suitable for regular hole arrays and are recipe data.
+    auto_max_candidates: int = 128
+    auto_max_contours_per_mask: int = 256
+    auto_time_limit_s: float = 12.0
+    auto_array_mode: bool = True
 
 
 @dataclass

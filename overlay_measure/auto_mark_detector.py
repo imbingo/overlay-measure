@@ -282,6 +282,25 @@ def detect_auto_marks_with_report(
         _, mask = cv2.threshold(blurred, 0, 255, threshold_type + cv2.THRESH_OTSU)
         masks.append(mask)
 
+    # A single global Otsu threshold loses dim holes when illumination drifts
+    # across a wafer/image.  The local masks are deliberately enabled for the
+    # array workflow only; duplicate suppression below merges their candidates.
+    if bool(getattr(params, "auto_array_mode", True)):
+        min_dimension = min(image_u8.shape[:2])
+        if min_dimension >= 3:
+            block_size = max(3, min(101, (min_dimension // 8) | 1))
+            for threshold_type in (cv2.THRESH_BINARY_INV, cv2.THRESH_BINARY):
+                masks.append(
+                    cv2.adaptiveThreshold(
+                        blurred,
+                        255,
+                        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                        threshold_type,
+                        block_size,
+                        4,
+                    )
+                )
+
     # V1.4.1: skip the expensive full-image multi-circle RANSAC pre-pass.
     # On low-contrast/noisy microscope images this step can consume a very long time
     # before the normal contour-based auto detection runs, which appears as GUI freeze.
@@ -296,9 +315,9 @@ def detect_auto_marks_with_report(
     ]
     has_complete_circles = bool(results)
     mean_pixel_size = 0.5 * (pixel_size_x_um + pixel_size_y_um)
-    max_contours_per_mask = 96
-    max_results = 48
-    time_limit_s = 4.0
+    max_contours_per_mask = max(1, int(getattr(params, "auto_max_contours_per_mask", 256)))
+    max_results = max(1, int(getattr(params, "auto_max_candidates", 128)))
+    time_limit_s = max(1.0, float(getattr(params, "auto_time_limit_s", 12.0)))
     deadline = time.perf_counter() + time_limit_s
     total_contours = 0
     selected_contours = 0

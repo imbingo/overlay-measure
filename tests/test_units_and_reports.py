@@ -46,7 +46,7 @@ def test_auto_detect_report_exposes_limits():
 
     assert len(report.results) >= 1
     assert report.total_contours >= report.processed_contours
-    assert report.max_results == 48
+    assert report.max_results == 128
 
 
 def test_auto_detect_report_warning_text():

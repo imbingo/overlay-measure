@@ -96,7 +96,10 @@ def detect_auto_set(
             progress(30.0 * (image_index + 1) / search_count, f"{layer_name}候选搜索完成")
 
     results_all.sort(key=lambda result: -result.diameter_px)
-    results_all = results_all[:32]
+    # Do not silently discard half of a regular hole array here.  Each image
+    # already applies the recipe's explicit candidate limit and reports any
+    # truncation.  A shared cap would also let the first layer crowd out the
+    # second one in dual-image mode.
     candidates: Dict[str, Dict[str, DetectionResult]] = {}
     detected: Dict[str, Dict[str, DetectionResult]] = {}
     image_map = dict(image_pairs)
@@ -188,7 +191,9 @@ def _manual_overlay(
         if progress:
             progress(80.0 * index / max(1, len(tasks)), f"正在分析{layer_name} ROI")
         try:
-            detection = detect_manual_roi(mark_id, layer, image, entry.roi, params, config)
+            detection = detect_manual_roi(
+                mark_id, layer, image, entry.roi, params, config, cancelled
+            )
             detection.shape_params["roi_id"] = entry.roi_id
             detection.shape_params["roi_index"] = roi_index
             detection.shape_params["roi_label"] = f"ROI {roi_index}"

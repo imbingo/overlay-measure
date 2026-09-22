@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -99,7 +99,12 @@ def refine_contour_edges(
     return np.asarray(refined, dtype=np.float64), np.asarray(gradients, dtype=np.float64)
 
 
-def detect_subpixel_edges(gray: np.ndarray, roi: Roi, params: DetectionParams) -> SubpixelEdges:
+def detect_subpixel_edges(
+    gray: np.ndarray,
+    roi: Roi,
+    params: DetectionParams,
+    cancelled: Optional[Callable[[], bool]] = None,
+) -> SubpixelEdges:
     """Detect subpixel edge points inside ROI.
 
     Strategy:
@@ -138,7 +143,9 @@ def detect_subpixel_edges(gray: np.ndarray, roi: Roi, params: DetectionParams) -
     if len(offsets) < 5:
         offsets = np.linspace(-half, half, 9, dtype=np.float32)
 
-    for xi, yi in zip(xs, ys):
+    for point_index, (xi, yi) in enumerate(zip(xs, ys)):
+        if point_index % 128 == 0 and cancelled and cancelled():
+            raise InterruptedError("用户取消计算")
         grad = float(gmag[yi, xi])
         if grad < params.min_gradient:
             continue
@@ -199,4 +206,11 @@ def detect_subpixel_edges(gray: np.ndarray, roi: Roi, params: DetectionParams) -
     if len(pts) == 0:
         return SubpixelEdges(np.empty((0, 2), dtype=np.float32), np.empty((0,), dtype=np.float32), (x0, y0), "ROI 有效区域内未找到边缘点")
 
+    max_points = max(0, int(getattr(params, "max_edge_points", 2000)))
+    if max_points and len(pts) > max_points:
+        # Preserve the complete perimeter distribution for fitting.  Taking the
+        # first N scan-line points biases circles and ellipses toward the top.
+        indices = np.linspace(0, len(pts) - 1, max_points, dtype=np.intp)
+        pts = pts[indices]
+        wg = wg[indices]
     return SubpixelEdges(pts, wg, (x0, y0), "")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -148,7 +148,12 @@ def circle_diameter_statistics(
     }
 
 
-def fit_circle_ransac(points: np.ndarray, residual_limit_px: float, iterations: int = 250) -> Tuple[float, float, float, float, np.ndarray]:
+def fit_circle_ransac(
+    points: np.ndarray,
+    residual_limit_px: float,
+    iterations: int = 250,
+    cancelled: Optional[Callable[[], bool]] = None,
+) -> Tuple[float, float, float, float, np.ndarray]:
     n = len(points)
     if n < 3:
         raise ValueError("圆拟合至少需要 3 个点")
@@ -161,7 +166,9 @@ def fit_circle_ransac(points: np.ndarray, residual_limit_px: float, iterations: 
     # Earlier versions silently multiplied it by 2.5, allowing mixed inner and
     # outer edges to survive as one circle.
     thresh = max(0.10, float(residual_limit_px))
-    for _ in range(iterations):
+    for iteration in range(iterations):
+        if iteration % 16 == 0 and cancelled and cancelled():
+            raise InterruptedError("用户取消计算")
         idx = rng.choice(n, 3, replace=False)
         circle = _circle_from_3pts(points[idx[0]], points[idx[1]], points[idx[2]])
         if circle is None:
@@ -403,7 +410,11 @@ def fit_edge_center(points: np.ndarray) -> FitResult:
     )
 
 
-def fit_mark_shape(points: np.ndarray, params: DetectionParams) -> FitResult:
+def fit_mark_shape(
+    points: np.ndarray,
+    params: DetectionParams,
+    cancelled: Optional[Callable[[], bool]] = None,
+) -> FitResult:
     if points is None or len(points) < 3:
         raise ValueError("有效边缘点数量不足，无法拟合")
 
@@ -419,7 +430,9 @@ def fit_mark_shape(points: np.ndarray, params: DetectionParams) -> FitResult:
     if mode in {"Auto", "Circle"} and len(points) >= 3:
         try:
             if params.use_ransac:
-                cx, cy, r, residual, mask = fit_circle_ransac(points, params.residual_limit_px)
+                cx, cy, r, residual, mask = fit_circle_ransac(
+                    points, params.residual_limit_px, cancelled=cancelled
+                )
             else:
                 initial_cx, initial_cy, initial_r, _ = fit_circle_least_squares(points)
                 cx, cy, r, residual = fit_circle_geometric_robust(

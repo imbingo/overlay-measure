@@ -71,7 +71,7 @@ def test_manual_overlay_keeps_good_roi_when_another_fails(monkeypatch):
     mark.add_roi("upper", Roi(30, 0, 20, 20, "Circle"), roi_id="bad")
     image = ImageData("test.png", np.zeros((64, 64), np.float32), "test.png")
 
-    def fake_detect(mark_id, layer, image, roi, params, config):
+    def fake_detect(mark_id, layer, image, roi, params, config, cancelled=None):
         if roi.x > 20:
             raise ValueError("synthetic failure")
         return _detection(mark_id, layer, good.roi_id)
