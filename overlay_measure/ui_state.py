@@ -787,6 +787,59 @@ class MainWindowStateMixin:
             else:
                 self.batch_detail_preview_label.setText(f"图像预览：第{self._batch_detail_last_single_index}次")
 
+        def _batch_preview_image_counts(self, mark_id: Optional[str] = None) -> tuple[int, int, int]:
+            mark_id = mark_id or self._current_mark_id()
+            images = self.batch_images.get(mark_id, {})
+            upper_count = len(images.get("upper", []))
+            lower_count = len(images.get("lower", [])) if self._current_mode() == "Dual Image" else 0
+            total = max(upper_count, lower_count) if self._current_mode() == "Dual Image" else upper_count
+            return upper_count, lower_count, total
+
+        def _refresh_batch_preview_controls(self) -> None:
+            if not hasattr(self, "batch_preview_nav"):
+                return
+            upper_count, lower_count, total = self._batch_preview_image_counts()
+            visible = self._is_batch_mode() and total > 1
+            self.batch_preview_nav.setVisible(visible)
+            if not visible:
+                return
+            current = max(1, min(total, int(self._batch_detail_last_single_index or 1)))
+            if current != self._batch_detail_last_single_index:
+                self._batch_detail_last_single_index = current
+            if self._current_mode() == "Dual Image":
+                upper_text = f"上 {min(current, upper_count)}/{upper_count}" if upper_count else "上 未导入"
+                lower_text = f"下 {min(current, lower_count)}/{lower_count}" if lower_count else "下 未导入"
+                self.batch_preview_index_label.setText(f"批量预览 {upper_text} · {lower_text}")
+            else:
+                self.batch_preview_index_label.setText(f"批量预览 {current}/{upper_count}")
+            locked = self._calculation_running
+            self.batch_preview_previous_btn.setEnabled(not locked and current > 1)
+            self.batch_preview_next_btn.setEnabled(not locked and current < total)
+
+        def _set_batch_preview_index(self, requested_index: int) -> None:
+            if not self._is_batch_mode() or self._calculation_running:
+                return
+            _, _, total = self._batch_preview_image_counts()
+            if total <= 0:
+                return
+            index = max(1, min(total, int(requested_index)))
+            if hasattr(self, "batch_detail_combo") and self.batch_detail_combo.isVisible() and self.batch_detail_combo.currentData() != "all":
+                combo_index = self.batch_detail_combo.findData(index)
+                if combo_index >= 0:
+                    self.batch_detail_combo.setCurrentIndex(combo_index)
+                    return
+            self._batch_detail_last_single_index = index
+            self._update_batch_preview_label()
+            self._sync_current_mark_images()
+            self._refresh_auto_selection_combos()
+            self._refresh_all_widgets()
+
+        def show_previous_batch_preview(self) -> None:
+            self._set_batch_preview_index(self._batch_detail_last_single_index - 1)
+
+        def show_next_batch_preview(self) -> None:
+            self._set_batch_preview_index(self._batch_detail_last_single_index + 1)
+
         def _on_batch_detail_changed(self):
             if not hasattr(self, "batch_detail_combo"):
                 return
@@ -1075,6 +1128,7 @@ class MainWindowStateMixin:
 
         def _refresh_all_widgets(self, *args):
             self._refresh_roi_index_combo()
+            self._refresh_batch_preview_controls()
             if hasattr(self, "batch_detail_bar"):
                 self.batch_detail_bar.setVisible(
                     self._is_batch_mode() and any(self.batch_run_records.values())

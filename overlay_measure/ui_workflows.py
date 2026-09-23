@@ -743,6 +743,8 @@ class MainWindowWorkflowMixin:
             if added:
                 self.batch_run_records[mark_id] = []
                 self.batch_overlays[mark_id] = []
+                self._batch_detail_run_index = 1
+                self._batch_detail_last_single_index = 1
                 self._set_image_for_layer(mark_id, layer, resolve_image(target[0]), "batch_preview")
                 self._invalidate_image_dependent_results(mark_id, layer)
             return added, duplicates
