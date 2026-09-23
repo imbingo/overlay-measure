@@ -656,6 +656,7 @@ class MainWindowBuilderMixin:
             self.batch_import_source_combo = SidebarComboBox()
             self.batch_import_source_combo.addItem("选择图片", "Files")
             self.batch_import_source_combo.addItem("选择文件夹", "Folder")
+            self.batch_import_source_combo.addItem("选择多个文件夹", "Folders")
             self.batch_recursive_check = QCheckBox("含子目录")
             self.batch_recursive_check.setChecked(False)
             self.batch_recursive_check.setEnabled(False)
@@ -1133,7 +1134,7 @@ class MainWindowBuilderMixin:
             self.batch_clear_btn.clicked.connect(self.clear_batch_images)
             self.measurement_run_mode_combo.currentIndexChanged.connect(self._refresh_all_widgets)
             self.batch_import_source_combo.currentIndexChanged.connect(
-                lambda: self.batch_recursive_check.setEnabled(self._combo_value(self.batch_import_source_combo) == "Folder")
+                lambda: self.batch_recursive_check.setEnabled(self._combo_value(self.batch_import_source_combo) in {"Folder", "Folders"})
             )
             if hasattr(self, "algorithm_path_button"):
                 self.algorithm_path_button.clicked.connect(self.show_algorithm_path_dialog)

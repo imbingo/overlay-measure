@@ -10,17 +10,19 @@ from typing import Dict, Optional
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import QObject, QPoint, QPointF, QRectF, QThread, QTimer, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import QDir, QObject, QPoint, QPointF, QRectF, QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QDialogButtonBox,
     QFrame,
     QGridLayout,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFileSystemModel,
     QFormLayout,
     QGroupBox,
     QHeaderView,
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -43,6 +46,7 @@ from PySide6.QtWidgets import (
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
+    QTreeView,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
@@ -247,6 +251,112 @@ class ImageDiagnosticsDialog(QDialog):
                     pv=float(np.ptp(values)),
                 )
             )
+
+
+class MultiFolderSelectionDialog(QDialog):
+    """Qt folder picker with real extended selection, independent of native dialog limits."""
+
+    def __init__(self, start_directory: str = "", remembered_folders: list[str] | None = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("选择多个批量图像文件夹")
+        self.setMinimumSize(760, 520)
+        self.resize(900, 620)
+        self._selected_paths: list[str] = []
+
+        layout = QVBoxLayout(self)
+        hint = QLabel("在目录树中按住 Ctrl 或 Shift 选择多个文件夹，再点击“添加所选文件夹”。")
+        hint.setWordWrap(True)
+        hint.setObjectName("statusCaption")
+        layout.addWidget(hint)
+
+        navigation = QHBoxLayout()
+        self.path_edit = QLineEdit()
+        self.path_edit.setPlaceholderText("输入或粘贴文件夹路径")
+        self.up_button = QPushButton("上一级")
+        self.go_button = QPushButton("转到")
+        navigation.addWidget(self.path_edit, 1)
+        navigation.addWidget(self.up_button)
+        navigation.addWidget(self.go_button)
+        layout.addLayout(navigation)
+
+        self.model = QFileSystemModel(self)
+        self.model.setFilter(QDir.AllDirs | QDir.NoDotAndDotDot)
+        self.tree = QTreeView()
+        self.tree.setModel(self.model)
+        self.tree.setSelectionMode(QTreeView.ExtendedSelection)
+        self.tree.setSelectionBehavior(QTreeView.SelectRows)
+        for column in range(1, self.model.columnCount()):
+            self.tree.hideColumn(column)
+        layout.addWidget(self.tree, 1)
+
+        select_row = QHBoxLayout()
+        self.add_button = QPushButton("添加所选文件夹")
+        self.remove_button = QPushButton("移除选中项")
+        select_row.addWidget(self.add_button)
+        select_row.addWidget(self.remove_button)
+        select_row.addStretch(1)
+        layout.addLayout(select_row)
+        layout.addWidget(QLabel("本次导入的文件夹（可多选，确认后会记住）："))
+        self.selected_list = QListWidget()
+        self.selected_list.setSelectionMode(QListWidget.ExtendedSelection)
+        layout.addWidget(self.selected_list)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("确认导入")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.go_button.clicked.connect(self._go_to_path)
+        self.path_edit.returnPressed.connect(self._go_to_path)
+        self.up_button.clicked.connect(self._go_up)
+        self.add_button.clicked.connect(self._add_tree_selection)
+        self.remove_button.clicked.connect(self._remove_list_selection)
+
+        initial = Path(start_directory) if start_directory else Path.home()
+        if not initial.is_dir():
+            initial = Path.home()
+        self._set_root(initial)
+        for folder in remembered_folders or []:
+            self._add_path(folder)
+        if self.selected_list.count():
+            self.selected_list.selectAll()
+
+    def _set_root(self, directory: Path) -> None:
+        directory = directory.expanduser().resolve(strict=False)
+        if not directory.is_dir():
+            return
+        index = self.model.setRootPath(str(directory))
+        self.tree.setRootIndex(index)
+        self.path_edit.setText(str(directory))
+
+    def _go_to_path(self) -> None:
+        self._set_root(Path(self.path_edit.text().strip()))
+
+    def _go_up(self) -> None:
+        current = Path(self.path_edit.text().strip())
+        parent = current.parent if current.parent != current else current
+        self._set_root(parent)
+
+    def _add_path(self, path: str) -> None:
+        directory = Path(path).expanduser().resolve(strict=False)
+        if not directory.is_dir():
+            return
+        normalized = str(directory)
+        if normalized.casefold() in {self.selected_list.item(index).text().casefold() for index in range(self.selected_list.count())}:
+            return
+        self.selected_list.addItem(normalized)
+
+    def _add_tree_selection(self) -> None:
+        for index in self.tree.selectionModel().selectedRows(0):
+            self._add_path(self.model.filePath(index))
+
+    def _remove_list_selection(self) -> None:
+        for item in self.selected_list.selectedItems():
+            self.selected_list.takeItem(self.selected_list.row(item))
+
+    def selected_directories(self) -> list[str]:
+        return [self.selected_list.item(index).text() for index in range(self.selected_list.count())]
 
 
 class ImageCanvas(QLabel):

@@ -200,7 +200,7 @@ def test_ui_excel_export_contains_every_batch_detection(tmp_path, monkeypatch):
         {"run_index": 3, "workflow": "Manual", "detections": {}, "selection": {}, "upper_file": "bad.png", "lower_file": "", "overlay": None, "error": "识别失败"},
     ]
     output = tmp_path / "batch.xlsx"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(output), "Excel (*.xlsx)"))
+    monkeypatch.setattr(window, "_choose_export_result_path", lambda: str(output))
     monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: QMessageBox.Ok)
     monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.Ok)
     monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: QMessageBox.Ok)

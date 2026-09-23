@@ -69,6 +69,7 @@ from .quality_profiles import (
 from .recipe_manager import load_recipe, load_recipe_with_geometry, save_recipe
 from .recipe_library import RecipeLibrary, RecipeLibraryEntry
 from .recent_image_store import RecentImageStore
+from .dialog_state_store import DialogStateStore
 from .recipe_integrity import seal_recipe, verify_recipe
 from .result_exporter import build_detection_rows, export_results
 from .rz_calculator import build_summary_rows
@@ -177,6 +178,7 @@ class MainWindow(
         self.recipe_integrity_status = "Unsealed"
         self.recipe_library = RecipeLibrary()
         self.recent_image_store = RecentImageStore()
+        self.dialog_state_store = DialogStateStore()
         self.recipe_quick_menu: Optional[RecipeQuickMenu] = None
         self.access_controller = AccessController()
         self.operation_mode = "Production"

@@ -78,7 +78,7 @@ from .rz_calculator import build_summary_rows
 from .runtime_support import RecoveryStore, build_runtime_logger
 
 from .ui_constants import LAYER_LABELS, RESULT_LABELS, STEP_TITLES
-from .ui_components import ImageDiagnosticsDialog, ImageViewerDialog
+from .ui_components import ImageDiagnosticsDialog, ImageViewerDialog, MultiFolderSelectionDialog
 from .ui_components import (
     CollapsibleSection,
     FramelessTitleBar,
@@ -157,6 +157,7 @@ class MainWindowWorkflowMixin:
                 self._set_image_for_layer(mark_id, layer, image, "single")
                 self._invalidate_image_dependent_results(mark_id, layer)
                 self.recent_image_store.add(path, layer)
+                self.dialog_state_store.remember_file("image_import", path)
                 self._sync_current_mark_images()
                 self._refresh_auto_selection_combos()
                 layer_name = "上层/单图" if layer == "upper" else "下层"
@@ -750,18 +751,43 @@ class MainWindowWorkflowMixin:
             title = f"追加批量 {mark_id} {LAYER_LABELS.get(layer, layer)}图像"
             import_source = self._combo_value(self.batch_import_source_combo)
             if import_source == "Folder":
-                folder = QFileDialog.getExistingDirectory(self, title, "", QFileDialog.ShowDirsOnly)
+                folder = QFileDialog.getExistingDirectory(
+                    self, title, self.dialog_state_store.directory("batch_folder"), QFileDialog.ShowDirsOnly
+                )
                 paths = self._collect_batch_paths(folder, self.batch_recursive_check.isChecked()) if folder else []
+                if folder:
+                    self.dialog_state_store.remember_directory("batch_folder", folder, [folder])
                 if folder and not paths:
                     QMessageBox.warning(self, "未找到图像", "所选文件夹中没有可导入的图像或矩阵文件。")
-            else:
-                paths, _ = QFileDialog.getOpenFileNames(
+            elif import_source == "Folders":
+                dialog = MultiFolderSelectionDialog(
+                    self.dialog_state_store.directory("batch_folders"),
+                    self.dialog_state_store.paths("batch_folders"),
                     self,
-                    title,
-                    "",
-                    "图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;矩阵 (*.csv *.txt *.npy);;全部文件 (*)",
                 )
+                if dialog.exec() != QDialog.Accepted:
+                    paths = []
+                else:
+                    folders = dialog.selected_directories()
+                    paths = []
+                    for folder in folders:
+                        paths.extend(self._collect_batch_paths(folder, self.batch_recursive_check.isChecked()))
+                    paths = sorted(set(paths), key=lambda path: self._natural_path_sort_key(Path(path)))
+                    if folders:
+                        self.dialog_state_store.remember_directory("batch_folders", folders[0], folders)
+                    if folders and not paths:
+                        QMessageBox.warning(self, "未找到图像", "所选文件夹中没有可导入的图像或矩阵文件。")
+            else:
+                dialog = QFileDialog(self, title, self.dialog_state_store.directory("batch_files"))
+                dialog.setNameFilter("图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;矩阵 (*.csv *.txt *.npy);;全部文件 (*)")
+                dialog.setFileMode(QFileDialog.ExistingFiles)
+                last_path = self.dialog_state_store.last_path("batch_files")
+                if last_path:
+                    dialog.selectFile(last_path)
+                paths = dialog.selectedFiles() if dialog.exec() == QDialog.Accepted else []
                 paths = sorted(paths, key=lambda path: self._natural_path_sort_key(Path(path)))
+                if paths:
+                    self.dialog_state_store.remember_file("batch_files", paths[-1])
             if not paths:
                 self._append_log(f"取消{title}。")
                 return
@@ -923,30 +949,27 @@ class MainWindowWorkflowMixin:
             self._import_image_path(path, layer, "已拖入")
 
         def import_upper_image(self):
-            mark_id = self._current_mark_id()
-            path, _ = QFileDialog.getOpenFileName(
-                self,
-                "导入上层/单张图像",
-                "",
-                "图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;矩阵 (*.csv *.txt *.npy);;全部文件 (*)",
-            )
+            path = self._choose_image_file("导入上层/单张图像")
             if not path:
                 self._append_log("取消导入上层/单图。")
                 return
             self._import_image_path(path, "upper", "已导入")
 
         def import_lower_image(self):
-            mark_id = self._current_mark_id()
-            path, _ = QFileDialog.getOpenFileName(
-                self,
-                "导入下层图像",
-                "",
-                "图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;矩阵 (*.csv *.txt *.npy);;全部文件 (*)",
-            )
+            path = self._choose_image_file("导入下层图像")
             if not path:
                 self._append_log("取消导入下层图像。")
                 return
             self._import_image_path(path, "lower", "已导入")
+
+        def _choose_image_file(self, title: str) -> str:
+            dialog = QFileDialog(self, title, self.dialog_state_store.directory("image_import"))
+            dialog.setNameFilter("图像 (*.png *.jpg *.jpeg *.bmp *.tif *.tiff);;矩阵 (*.csv *.txt *.npy);;全部文件 (*)")
+            dialog.setFileMode(QFileDialog.ExistingFile)
+            last_path = self.dialog_state_store.last_path("image_import")
+            if last_path:
+                dialog.selectFile(last_path)
+            return dialog.selectedFiles()[0] if dialog.exec() == QDialog.Accepted and dialog.selectedFiles() else ""
 
         def add_mark(self):
             self.marks = {
@@ -1725,12 +1748,7 @@ class MainWindowWorkflowMixin:
                 QMessageBox.warning(self, "无结果", "当前没有可导出的分析结果。")
                 return
             self._pull_config_from_ui()
-            path, _ = QFileDialog.getSaveFileName(
-                self,
-                "导出结果",
-                self._default_export_filename(),
-                "Excel (*.xlsx);;CSV (*.csv)",
-            )
+            path = self._choose_export_result_path()
             if not path:
                 return
             if Path(path).suffix.lower() == ".csv":
@@ -1901,5 +1919,15 @@ class MainWindowWorkflowMixin:
                         },
                     )
                 QMessageBox.information(self, "导出完成", f"结果已导出：\n{path}")
+                self.dialog_state_store.remember_file("export_result", path)
             except Exception as exc:
                 QMessageBox.critical(self, "导出失败", str(exc))
+
+        def _choose_export_result_path(self) -> str:
+            directory = self.dialog_state_store.directory("export_result")
+            default_path = str(Path(directory) / self._default_export_filename()) if directory else self._default_export_filename()
+            dialog = QFileDialog(self, "导出结果", default_path)
+            dialog.setAcceptMode(QFileDialog.AcceptSave)
+            dialog.setNameFilter("Excel (*.xlsx);;CSV (*.csv)")
+            dialog.selectFile(default_path)
+            return dialog.selectedFiles()[0] if dialog.exec() == QDialog.Accepted and dialog.selectedFiles() else ""
