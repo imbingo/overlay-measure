@@ -1,5 +1,11 @@
 **Design QA**
 
+## Persistent Visual Rules
+
+- All functional icons must remain compact, quiet and subordinate to the command text. Do not introduce oversized, heavy black, skeuomorphic, or decorative system icons into command bars, side panels or collapsible sections.
+- Prefer short text labels and simple symbols for common actions. An icon may clarify a familiar action, but must never become the primary visual weight of a control.
+- Preserve the V2.2.4 command-bar character: stable text-first buttons, restrained borders, and consistent spacing. Any icon change requires a populated-window screenshot review before release.
+
 - Source visual truth: the established V1.5.7 recipe-manager visual hierarchy and V1.6.0 access-control styling.
 - Implementation screenshot: `D:\CodingTool\overlay_measure\source\artifacts\v1_6_1_recipe-library.png`
 - Viewport: 920 x 560.

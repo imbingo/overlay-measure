@@ -1,9 +1,40 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from .models import ImageData
+
+
+@dataclass(frozen=True)
+class BatchPairingSummary:
+    """Small, presentation-neutral summary for one Mark's batch inputs."""
+
+    pairing_text: str
+    status_text: str
+    ready: bool
+
+
+def summarize_batch_pairing(upper_count: int, lower_count: int, dual_image: bool) -> BatchPairingSummary:
+    """Describe whether a Mark's imported batch images are runnable.
+
+    Pairing remains positional and is validated separately before a run.  This
+    helper only gives the operator a compact, unambiguous table summary.
+    """
+    if not upper_count and not lower_count:
+        return BatchPairingSummary("—", "未导入", False)
+    if not dual_image:
+        if upper_count:
+            return BatchPairingSummary("单图，无需配对", "就绪", True)
+        return BatchPairingSummary("—", "缺少单图", False)
+    if not upper_count:
+        return BatchPairingSummary("缺少上层", "需检查", False)
+    if not lower_count:
+        return BatchPairingSummary("缺少下层", "需检查", False)
+    if upper_count != lower_count:
+        return BatchPairingSummary(f"{abs(upper_count - lower_count)}张未配对", "需检查", False)
+    return BatchPairingSummary(f"{upper_count}组已配对", "就绪", True)
 
 
 def validate_batch_pairing(

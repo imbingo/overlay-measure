@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 
 from .auto_mark_detector import detect_auto_marks_with_report
 from .access_control import AccessController
-from .batch_pairing import validate_batch_pairing
+from .batch_pairing import summarize_batch_pairing, validate_batch_pairing
 from .batch_image_store import BatchImageRef, resolve_image
 from .candidate_ordering import assign_spatial_candidate_ids, candidate_display_label, resolve_preferred_candidate
 from .export_naming import build_export_filename
@@ -831,7 +831,7 @@ class MainWindowWorkflowMixin:
         def _refresh_batch_image_table(self):
             if not hasattr(self, "batch_image_table"):
                 return
-            headers = ["Mark", "上层/单图", "下层", "状态"]
+            headers = ["Mark", "上层/单图", "下层", "配对", "状态"]
             rows = []
             is_dual = self._current_mode() == "Dual Image"
             for mark_id in ("Mark1", "Mark2"):
@@ -839,21 +839,32 @@ class MainWindowWorkflowMixin:
                 lower_images = self.batch_images.get(mark_id, {}).get("lower", [])
                 upper_count = len(upper_images)
                 lower_count = len(lower_images)
-                if upper_count == 0:
-                    status = "未导入"
-                elif is_dual and lower_count == 0:
-                    status = "缺少下层"
-                elif is_dual and upper_count != lower_count:
-                    status = "上下数量不一致"
-                else:
-                    status = "可批量计算"
+                pairing = summarize_batch_pairing(upper_count, lower_count, is_dual)
                 rows.append([
                     mark_id,
                     f"{upper_count}张/{self._batch_source_folder_count(upper_images)}目录",
                     f"{lower_count}张/{self._batch_source_folder_count(lower_images)}目录",
-                    status,
+                    pairing.pairing_text,
+                    pairing.status_text,
                 ])
             self._fill_table(self.batch_image_table, headers, rows)
+            for column, width in enumerate((42, 70, 70, 88, 52)):
+                self.batch_image_table.setColumnWidth(column, width)
+            self.batch_image_table.setToolTip(
+                "双图模式按导入列表的自然排序逐张配对；数量不一致时不可运行。"
+            )
+            for row in range(self.batch_image_table.rowCount()):
+                pairing_item = self.batch_image_table.item(row, 3)
+                status_item = self.batch_image_table.item(row, 4)
+                ready = status_item is not None and status_item.text() == "就绪"
+                color = QColor("#248A3D") if ready else QColor("#B26A00")
+                for item in (pairing_item, status_item):
+                    if item is not None:
+                        item.setForeground(color)
+                        item.setToolTip(
+                            "上下层按导入列表的自然排序一一配对。"
+                            if ready else "请补齐或清空后重新导入上下层图像。"
+                        )
 
         def _refresh_repeatability_table(self):
             if not hasattr(self, "repeat_table"):

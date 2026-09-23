@@ -700,8 +700,8 @@ class MainWindowBuilderMixin:
             batch_layout.addWidget(self.batch_image_table)
             batch_note = QLabel(
                 "可多选图片，也可选择文件夹自动导入；勾选“包含子文件夹”可扫描多级测量目录。重复文件会自动跳过。"
-                "双图模式下，上下层按追加后的列表顺序一一配对；"
-                "如需重新选择，请先清空批量图像。计算时会复用当前 Mark 的 ROI 模板和算法参数。"
+                "双图模式下，表格会显示已配对组数；上下层数量不一致时不可运行。"
+                "计算时会复用当前 Mark 的 ROI 模板和算法参数。"
             )
             batch_note.setWordWrap(True)
             batch_note.setObjectName("statusCaption")
