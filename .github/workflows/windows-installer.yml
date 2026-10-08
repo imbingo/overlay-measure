@@ -93,7 +93,8 @@ jobs:
   publish:
     name: Publish version release
     needs: build
-    if: github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release: v')
+    if: >-
+      github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release: v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
