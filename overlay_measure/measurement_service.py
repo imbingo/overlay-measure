@@ -13,6 +13,7 @@ from .measurement_units import (
     equivalent_size_um_from_shape,
     points_to_um_distances,
     radial_diameter_statistics_um,
+    radial_roundness_um,
     radial_diameter_residual_um,
     scalar_px_to_um,
 )
@@ -64,7 +65,7 @@ def _algorithm_path_for_detection(detection: DetectionResult, workflow: str = "M
     if detection.shape_params.get("closed_edge_selection"):
         return f"手动ROI({roi_type}) → 完整闭合边界/光晕筛选 → 梯度峰亚像素定位 → {detection.fitting_mode}拟合 → 物理尺寸换算"
     if detection.fitting_mode == "CaliperCircle":
-        return "手动ROI → 三点/卡尺圆初始化 → 径向灰度峰值找边 → 同一圆周边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算"
+        return "手动ROI → 三点/卡尺圆初始化 → 径向灰度峰值找边 → 同一圆周边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算；卡尺圆圆度：RANSAC有效轮廓点 → 标定物理半径 → 最大半径 - 最小半径"
     if detection.fitting_mode == "RegionCenter":
         return "手动ROI → 区域分割 → 主区域最小外接矩形中心 → 中心差计算"
     if detection.fitting_mode == "Line":
@@ -260,6 +261,9 @@ def detect_manual_roi(
                 "minimum_diameter_px": cal.minimum_diameter_px,
                 "diameter_pv_px": cal.diameter_pv_px,
                 **diameter_statistics_um,
+                "roundness_um": radial_roundness_um(
+                    cal.edge_points, cal.center_x_px, cal.center_y_px, config,
+                ),
                 "angular_coverage": cal.angular_coverage,
                 "maximum_gap_deg": cal.maximum_gap_deg,
                 "diameter_definition": "maximum_feret" if diameter_mode == "Maximum" else "robust_average_circle",

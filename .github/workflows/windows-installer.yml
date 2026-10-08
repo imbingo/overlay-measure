@@ -89,3 +89,31 @@ jobs:
             installer/generated_version_info.txt
           if-no-files-found: ignore
           retention-days: 7
+
+  publish:
+    name: Publish version release
+    needs: build
+    if: github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release: v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer-${{ github.run_number }}
+          path: release
+      - name: Publish installer, checksum and update manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(python -c 'from overlay_measure import __version__; print(__version__)')
+          TAG="v$VERSION"
+          test -f "release_notes_$TAG.md"
+          test -f "release/SOMA_Vision_Metrology_V${VERSION}_Setup.exe"
+          (cd release && sha256sum --check "SOMA_Vision_Metrology_V${VERSION}_Setup.exe.sha256")
+          gh release create "$TAG" release/* \
+            --target "$GITHUB_SHA" \
+            --title "SOMA Vision Metrology V$VERSION" \
+            --notes-file "release_notes_$TAG.md" \
+            --latest

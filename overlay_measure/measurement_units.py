@@ -95,6 +95,24 @@ def points_to_um_distances(
     return np.hypot(dx_um, dy_um)
 
 
+def radial_roundness_um(
+    points_xy: Iterable[tuple[float, float]] | np.ndarray,
+    center_x_px: float,
+    center_y_px: float,
+    config: MeasurementConfig,
+) -> float | None:
+    """Radial envelope width (Rmax - Rmin), in um, of final inlier points.
+
+    Calibrate X/Y separately; fewer than three finite radii are invalid.
+    This is neither diameter PV nor ellipse model roundness.
+    """
+    distances = points_to_um_distances(points_xy, center_x_px, center_y_px, config)
+    distances = distances[np.isfinite(distances)]
+    if len(distances) < 3:
+        return None
+    return float(np.max(distances) - np.min(distances))
+
+
 def radial_diameter_residual_um(
     points_xy: Iterable[tuple[float, float]] | np.ndarray,
     center_x_px: float,

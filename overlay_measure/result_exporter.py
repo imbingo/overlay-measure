@@ -37,6 +37,7 @@ DETAIL_COLUMNS = {
     "maximum_diameter_um": "最大直径(μm)",
     "minimum_diameter_um": "最小直径(μm)",
     "diameter_pv_um": "直径PV(μm)",
+    "roundness_um": "圆度(μm)",
     "diameter_mode": "直径定义",
     "fit_residual_um": "参考残差(μm)",
     "edge_point_count": "边缘点数",
@@ -184,6 +185,7 @@ def build_detection_rows(
                 "maximum_diameter_um": det.shape_params.get("maximum_diameter_um"),
                 "minimum_diameter_um": det.shape_params.get("minimum_diameter_um"),
                 "diameter_pv_um": det.shape_params.get("diameter_pv_um"),
+                "roundness_um": det.shape_params.get("roundness_um"),
                 "diameter_mode": {"Average": "平均直径", "Maximum": "最大直径"}.get(
                     det.shape_params.get("diameter_mode"),
                     det.shape_params.get("diameter_mode", ""),
@@ -406,6 +408,7 @@ def export_results(
             {"项目": "角度补偿公式", "内容": "ΔX=原始ΔX+厚度×Ry/1000；ΔY=原始ΔY-厚度×Rx/1000"},
             {"项目": "椭圆直径定义", "内容": "(物理长轴+物理短轴)/2"},
             {"项目": "椭圆圆度定义", "内容": "(物理长轴-物理短轴)/2；非 ISO 最小区域圆度"},
+            {"项目": "卡尺圆圆度定义", "内容": "RANSAC有效轮廓点 → 标定物理半径 → 最大半径 - 最小半径；单位μm"},
             {"项目": "Rz分布方向", "内容": config.rz_layout},
             {"项目": "Rz单位", "内容": "μrad"},
             {"项目": "Mark间距L(μm)", "内容": config.rz_distance_l_um},
