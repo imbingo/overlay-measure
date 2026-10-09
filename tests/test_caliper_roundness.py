@@ -59,9 +59,21 @@ def test_service_uses_final_inliers_and_preserves_diameter_statistics(monkeypatc
     assert radial_roundness_um(np.vstack((points, rejected)), 120, 230, config) > 100
     for key, value in radial_diameter_statistics_um(points, 120, 230, config).items():
         assert detection.shape_params[key] == value
-    assert detection.ellipse_roundness_um is None
-    assert "RANSAC有效轮廓点 → 标定物理半径 → 最大半径 - 最小半径" in detection.shape_params["algorithm_path"]
+    assert detection.ellipse_roundness_um == detection.shape_params["ellipse_roundness_um"]
+    assert "物理坐标椭圆拟合 → (长轴 - 短轴) / 2" in detection.shape_params["algorithm_path"]
     assert compact_detection(detection).shape_params["roundness_um"] == detection.shape_params["roundness_um"]
+    # The automatic Caliper Circle path must use the same final inlier contour.
+    from overlay_measure.production_measurement import refine_candidate
+    from overlay_measure.measurement_units import detection_roundness_display
+    monkeypatch.setattr("overlay_measure.production_measurement.detect_caliper_circle", lambda *args: cal)
+    auto = refine_candidate(np.zeros((10, 10)), detection, DetectionParams(), config)
+    assert auto.fitting_mode == "ProductionCircle"
+    assert auto.ellipse_roundness_um == detection.ellipse_roundness_um
+    assert detection_roundness_display(auto, config) == detection_roundness_display(detection, config)
+    row = build_detection_rows({"Mark1": {"upper": auto}}, {}, config)[0]
+    assert row["ellipse_roundness_um"] == detection.ellipse_roundness_um
+    assert row["roundness_angle_deg"] == auto.shape_params["roundness_angle_deg"]
+
 
 
 def detection(mode="CaliperCircle", **shape):
@@ -71,12 +83,12 @@ def detection(mode="CaliperCircle", **shape):
 def test_export_roundness_and_ellipse_remain_independent(tmp_path):
     config = MeasurementConfig()
     rows = build_detection_rows({
-        "caliper": {"upper": detection(roundness_um=0.123)},
+        "caliper": {"upper": detection(roundness_um=0.300, ellipse_roundness_um=0.123, roundness_angle_deg=-35.0)},
         "ellipse": {"upper": detection("Ellipse", major_px=100., minor_px=80., angle_deg=0.)},
         "old": {"upper": detection()},
     }, {}, config)
-    assert rows[0]["roundness_um"] == 0.123
-    assert rows[0]["ellipse_roundness_um"] is None
+    assert rows[0]["roundness_um"] == 0.300
+    assert rows[0]["ellipse_roundness_um"] == 0.123
     assert rows[1]["roundness_um"] is None
     assert rows[1]["ellipse_roundness_um"] == pytest.approx((100-80)*config.pixel_size_x_um/2)
     assert rows[2]["roundness_um"] is None
@@ -84,8 +96,9 @@ def test_export_roundness_and_ellipse_remain_independent(tmp_path):
         path = tmp_path / f"results.{suffix}"
         export_results(str(path), rows, config)
         table = pd.read_excel(path, sheet_name="识别明细") if suffix == "xlsx" else pd.read_csv(path)
-        assert table.loc[0, "圆度(μm)"] == 0.123
-        assert pd.isna(table.loc[1, "圆度(μm)"])
+        assert table.loc[0, "椭圆圆度(μm)"] == 0.123
+        assert table.loc[0, "长轴角度(°)"] == -35.0
+        assert "圆度(μm)" not in table.columns
         assert "椭圆圆度(μm)" in table.columns
 
 
@@ -96,17 +109,19 @@ def test_ui_roundness_column_and_missing_values(batch, monkeypatch):
     try:
         entries = [{"mark_id": "Mark1", "layer": "upper", "detection": d,
                     "run_index": 1 if batch else None} for d in (
-            detection(roundness_um=0.1234), detection("Ellipse"), detection(), None,
+            detection("ProductionCircle" if batch else "CaliperCircle", ellipse_roundness_um=0.1234, roundness_angle_deg=-35.0), detection("Ellipse"), detection(), None,
         )]
         monkeypatch.setattr(window, "_display_detection_entries", lambda: entries)
         window._refresh_tables()
         headers = [window.det_table.horizontalHeaderItem(i).text() for i in range(window.det_table.columnCount())]
-        column = headers.index("圆度(μm)")
+        column = headers.index("椭圆圆度 (μm)")
         assert window.det_table.item(0, column).text() == "0.123"
+        assert window.det_table.item(0, headers.index("长轴角度 (°)")).text() == "-35.000"
+        assert "圆度(μm)" not in headers
         for row in (1, 2, 3):
             assert window.det_table.item(row, column).text() == ""
         assert window.det_table.item(3, headers.index("质量状态")).text() == "异常"
-        assert "最大半径 - 最小半径" in window.det_table.horizontalHeaderItem(column).toolTip()
+        assert "(物理长轴-物理短轴)/2" in window.det_table.horizontalHeaderItem(column).toolTip()
     finally:
         window.close()
         app.processEvents()

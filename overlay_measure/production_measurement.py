@@ -11,6 +11,8 @@ from .circle_ellipse_fitter import fit_rectangle
 from .measurement_service import attach_algorithm_path
 from .measurement_units import (
     points_to_um_distances,
+    contour_ellipse_metrics_um,
+    radial_roundness_um,
     radial_diameter_statistics_um,
     radial_diameter_residual_um,
     rotated_rect_size_um,
@@ -53,6 +55,7 @@ def refine_circle_candidate(
         "Inner to Outer",
     )
     precise = detect_caliper_circle(gray, roi, params)
+    contour_metrics = contour_ellipse_metrics_um(precise.edge_points, config)
     count = max(1, int(config.production_caliper_count))
     found_count = len(precise.edge_points) + len(precise.rejected_points)
     # Count alone can look healthy even when all accepted points occupy one arc.
@@ -90,6 +93,7 @@ def refine_circle_candidate(
         residual_um=residual_um,
         edge_point_count=len(precise.edge_points),
         confidence=precise.confidence,
+        ellipse_roundness_um=contour_metrics["ellipse_roundness_um"],
         fitting_mode="ProductionCircle",
         warning="",
         edge_points=[(float(x), float(y)) for x, y in precise.edge_points],
@@ -105,6 +109,8 @@ def refine_circle_candidate(
             "minimum_diameter_px": precise.minimum_diameter_px,
             "diameter_pv_px": precise.diameter_pv_px,
             **diameter_statistics_um,
+            **contour_metrics,
+            "roundness_um": radial_roundness_um(precise.edge_points, precise.center_x_px, precise.center_y_px, config),
             "angular_coverage": precise.angular_coverage,
             "maximum_gap_deg": precise.maximum_gap_deg,
             "diameter_definition": "robust_average_circle",

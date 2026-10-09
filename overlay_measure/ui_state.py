@@ -58,7 +58,7 @@ from .image_loader import SUPPORTED_EXTENSIONS, display_to_uint8, load_image
 from .measurement_engine import run_measurement_job
 from .geometry_models import GeometryRunResult
 from .measurement_service import attach_algorithm_path, describe_algorithm_path, detect_manual_roi
-from .measurement_units import ellipse_metrics_um, rotated_rect_size_um
+from .measurement_units import ellipse_metrics_um, rotated_rect_size_um, detection_roundness_display
 from .models import DetectionParams, DetectionResult, ImageData, MarkRecipe, MeasurementConfig, OverlayResult, Roi
 from .overlay_calculator import calculate_overlay, calculate_relative_overlay
 from .production_measurement import refine_candidate
@@ -1579,7 +1579,7 @@ class MainWindowStateMixin:
         def _refresh_tables(self):
             det_headers = [
                 "次数", "输入文件", "标记", "层", "中心 X (μm)", "中心 Y (μm)",
-                "尺寸/直径 (μm)", "椭圆圆度 (μm)", "圆度(μm)", "参考残差 (μm)", "边缘点数", "置信度", "算法",
+                "尺寸/直径 (μm)", "椭圆圆度 (μm)", "长轴角度 (°)", "参考残差 (μm)", "边缘点数", "置信度", "算法",
                 "质量状态", "质量门槛", "实际质量", "质量详情", "覆盖率",
                 "形状参数", "算法路径", "提示",
             ]
@@ -1623,8 +1623,7 @@ class MainWindowStateMixin:
                         minor_um = metrics.get("ellipse_minor_um", 0.0)
                         shape_txt = (
                             f"长轴={major_um:.3f}μm, "
-                            f"短轴={minor_um:.3f}μm, "
-                            f"角度={d.shape_params.get('angle_deg', 0):.3f}°"
+                            f"短轴={minor_um:.3f}μm"
                         )
                     elif d.fitting_mode == "Circle":
                         average = float(d.shape_params.get("average_diameter_um", d.diameter_um))
@@ -1704,15 +1703,13 @@ class MainWindowStateMixin:
                     roi_txt = f"ROI={roi_type_txt}, 边缘={edge_txt}"
                     display_mark_id = mark_id
                     roi_text = f"ROI {int(d.shape_params.get('roi_index', 1))}" if roi_id else ""
-                    ellipse_roundness = ""
-                    roundness = d.shape_params.get("roundness_um") if d.fitting_mode == "CaliperCircle" else None
-                    roundness_text = f"{roundness:.3f}" if roundness is not None else ""
-                    if d.fitting_mode == "Ellipse":
-                        ellipse_roundness = f"{ellipse_metrics_um(d.shape_params, self.config).get('ellipse_roundness_um', 0.0):.3f}"
+                    roundness, axis_angle = detection_roundness_display(d, self.config)
+                    ellipse_roundness = f"{roundness:.3f}" if roundness is not None else ""
+                    angle_text = f"{axis_angle:.3f}" if axis_angle is not None else ""
                     det_rows.append([
                         run_text, file_text, display_mark_id, LAYER_LABELS.get(layer, layer), roi_text,
                         f"{d.center_x_um:.3f}", f"{d.center_y_um:.3f}",
-                        f"{d.diameter_um:.3f}", ellipse_roundness, roundness_text, f"{d.residual_um:.3f}",
+                        f"{d.diameter_um:.3f}", ellipse_roundness, angle_text, f"{d.residual_um:.3f}",
                         str(d.edge_point_count), f"{d.confidence:.3f}", mode_txt,
                         {"Valid": "有效", "Invalid": "无效"}.get(d.shape_params.get("quality_status", ""), ""),
                         d.shape_params.get("quality_profile_label", quality_profile_display(self.config)),
@@ -1738,11 +1735,11 @@ class MainWindowStateMixin:
                             "roi_id": roi_id, "layer": layer,
                         })
             self._fill_table(self.det_table, det_headers, det_rows, det_payloads)
-            roundness_header = self.det_table.horizontalHeaderItem(det_headers.index("椭圆圆度 (μm)"))
-            if roundness_header is not None:
-                roundness_header.setToolTip("椭圆圆度=(物理长轴-物理短轴)/2；非 ISO 最小区域圆度")
-            self.det_table.horizontalHeaderItem(det_headers.index("圆度(μm)")).setToolTip(
-                "卡尺圆圆度：RANSAC有效轮廓点 → 标定物理半径 → 最大半径 - 最小半径"
+            self.det_table.horizontalHeaderItem(det_headers.index("椭圆圆度 (μm)")).setToolTip(
+                "椭圆圆度=(物理长轴-物理短轴)/2；圆形ROI使用最终有效轮廓拟合椭圆；非 ISO 最小区域圆度"
+            )
+            self.det_table.horizontalHeaderItem(det_headers.index("长轴角度 (°)")).setToolTip(
+                "物理长轴与X轴夹角，范围[-90°, 90°)；图像Y轴向下，顺时针为正；理想圆方向不唯一，留空"
             )
 
             ov_headers = ["项目", "Dx/Dy/Dxy/Rz", "数值", "判定", "质量门槛", "实际质量", "质量详情", "提示"]

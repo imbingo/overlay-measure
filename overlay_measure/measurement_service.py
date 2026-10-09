@@ -10,6 +10,8 @@ from .circle_ellipse_fitter import FitResult, fit_mark_shape
 from .models import DetectionParams, DetectionResult, ImageData, MeasurementConfig, Roi
 from .measurement_units import (
     ellipse_metrics_um,
+    contour_ellipse_metrics_um,
+    ellipse_major_axis_angle_deg,
     equivalent_size_um_from_shape,
     points_to_um_distances,
     radial_diameter_statistics_um,
@@ -54,7 +56,7 @@ def _algorithm_path_for_detection(detection: DetectionResult, workflow: str = "M
             }.get(detection.fitting_mode, f"亚像素边缘 → {detection.fitting_mode}拟合")
             return f"自动识别 → 候选轮廓 → ROI语义({roi_type}) → {fit_text} → 物理尺寸换算"
         if detection.fitting_mode == "ProductionCircle":
-            return "自动识别 → Otsu阈值/闭合轮廓候选 → 三点/候选圆初始化 → 径向卡尺精测 → 一致边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算"
+            return "自动识别 → Otsu阈值/闭合轮廓候选 → 三点/候选圆初始化 → 径向卡尺精测 → 一致边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算；椭圆圆度：有效轮廓点 → 物理坐标椭圆拟合 → (长轴 - 短轴) / 2；长轴角度[-90°, 90°)"
         if detection.fitting_mode == "ProductionRectangle":
             return "自动识别 → Otsu阈值/闭合轮廓候选 → AutoRectangle → 四边卡尺精测 → 旋转矩形拟合 → 中心差计算"
         if candidate:
@@ -65,7 +67,7 @@ def _algorithm_path_for_detection(detection: DetectionResult, workflow: str = "M
     if detection.shape_params.get("closed_edge_selection"):
         return f"手动ROI({roi_type}) → 完整闭合边界/光晕筛选 → 梯度峰亚像素定位 → {detection.fitting_mode}拟合 → 物理尺寸换算"
     if detection.fitting_mode == "CaliperCircle":
-        return "手动ROI → 三点/卡尺圆初始化 → 径向灰度峰值找边 → 同一圆周边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算；卡尺圆圆度：RANSAC有效轮廓点 → 标定物理半径 → 最大半径 - 最小半径"
+        return "手动ROI → 三点/卡尺圆初始化 → 径向灰度峰值找边 → 同一圆周边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算；椭圆圆度：RANSAC有效轮廓点 → 物理坐标椭圆拟合 → (长轴 - 短轴) / 2；长轴角度[-90°, 90°)"
     if detection.fitting_mode == "RegionCenter":
         return "手动ROI → 区域分割 → 主区域最小外接矩形中心 → 中心差计算"
     if detection.fitting_mode == "Line":
@@ -86,7 +88,10 @@ def _algorithm_path_for_detection(detection: DetectionResult, workflow: str = "M
 
 
 def attach_algorithm_path(detection: DetectionResult, workflow: str = "Manual") -> DetectionResult:
-    detection.shape_params["algorithm_path"] = _algorithm_path_for_detection(detection, workflow)
+    path = _algorithm_path_for_detection(detection, workflow)
+    if detection.fitting_mode in {"Circle", "CaliperCircle", "ProductionCircle"} and "椭圆圆度：" not in path:
+        path += "；椭圆圆度：最终有效轮廓点 → 物理坐标椭圆拟合 → (长轴 - 短轴) / 2；长轴角度[-90°, 90°)"
+    detection.shape_params["algorithm_path"] = path
     return detection
 
 
@@ -138,8 +143,12 @@ def _fit_to_detection(
         if fit.mode == "Ellipse":
             ellipse_metrics = ellipse_metrics_um(shape_params, config)
             shape_params.update(ellipse_metrics)
+            shape_params["roundness_angle_deg"] = ellipse_major_axis_angle_deg(shape_params, config)
         diameter_um = equivalent_size_um_from_shape(shape_params, fit.diameter_px, config)
         residual_um = scalar_px_to_um(fit.residual_px, config)
+
+    if fit.mode == "Circle":
+        shape_params.update(contour_ellipse_metrics_um(used_points, config))
 
     detection = DetectionResult(
         mark_id=mark_id,
@@ -161,7 +170,7 @@ def _fit_to_detection(
         ellipse_major_um=ellipse_metrics.get("ellipse_major_um"),
         ellipse_minor_um=ellipse_metrics.get("ellipse_minor_um"),
         ellipse_diameter_um=ellipse_metrics.get("ellipse_diameter_um"),
-        ellipse_roundness_um=ellipse_metrics.get("ellipse_roundness_um"),
+        ellipse_roundness_um=shape_params.get("ellipse_roundness_um"),
     )
     annotate_detection_quality(detection, config)
     return attach_algorithm_path(detection, "Manual")
@@ -200,6 +209,7 @@ def detect_manual_roi(
 
     if getattr(roi, "roi_type", "") == "Caliper Circle":
         cal = detect_caliper_circle(image.gray, roi, params)
+        contour_metrics = contour_ellipse_metrics_um(cal.edge_points, config)
         diameter_um, residual_um = radial_diameter_residual_um(
             cal.edge_points,
             cal.center_x_px,
@@ -248,6 +258,7 @@ def detect_manual_roi(
             residual_um=residual_um,
             edge_point_count=len(cal.edge_points),
             confidence=cal.confidence,
+            ellipse_roundness_um=contour_metrics["ellipse_roundness_um"],
             fitting_mode="CaliperCircle",
             warning="",
             edge_points=_point_list(cal.edge_points),
@@ -261,6 +272,7 @@ def detect_manual_roi(
                 "minimum_diameter_px": cal.minimum_diameter_px,
                 "diameter_pv_px": cal.diameter_pv_px,
                 **diameter_statistics_um,
+                **contour_metrics,
                 "roundness_um": radial_roundness_um(
                     cal.edge_points, cal.center_x_px, cal.center_y_px, config,
                 ),

@@ -113,6 +113,67 @@ def radial_roundness_um(
     return float(np.max(distances) - np.min(distances))
 
 
+def normalize_axis_angle_deg(angle_deg: float) -> float:
+    """An undirected axis angle in [-90, 90), with image Y pointing down."""
+    return float((angle_deg + 90.0) % 180.0 - 90.0)
+
+
+def contour_ellipse_metrics_um(points_xy, config: MeasurementConfig) -> dict:
+    """Supplement circle metrology with an ellipse fit of final physical inliers."""
+    invalid = {"ellipse_roundness_um": None, "roundness_angle_deg": None,
+               "contour_ellipse_major_um": None, "contour_ellipse_minor_um": None}
+    points = points_px_to_um(points_xy, config)
+    points = points[np.all(np.isfinite(points), axis=1)]
+    if len(points) < 5:
+        return invalid
+    points = points - np.mean(points, axis=0)
+    if np.linalg.matrix_rank(points) < 2:
+        return invalid
+    try:
+        _, (first, second), angle = cv2.fitEllipse(points.astype(np.float32))
+    except cv2.error:
+        return invalid
+    if not np.isfinite([first, second, angle]).all() or min(first, second) <= 0:
+        return invalid
+    return {
+        "ellipse_roundness_um": float(abs(first - second) / 2.0),
+        "contour_ellipse_major_um": float(max(first, second)),
+        "contour_ellipse_minor_um": float(min(first, second)),
+        "roundness_angle_deg": None if np.isclose(first, second, rtol=1e-5, atol=1e-8)
+        else normalize_axis_angle_deg(angle + (90.0 if second > first else 0.0)),
+    }
+
+
+def ellipse_major_axis_angle_deg(shape_params: dict, config: MeasurementConfig) -> float | None:
+    """Physical major-axis orientation of the existing pixel ellipse model."""
+    if "major_px" not in shape_params or "minor_px" not in shape_params:
+        return None
+    theta = np.deg2rad(float(shape_params.get("angle_deg", 0.0)))
+    rotation = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    transform = np.diag([config.pixel_size_x_um, config.pixel_size_y_um]) @ rotation
+    model = transform @ np.diag([float(shape_params["major_px"]) ** 2,
+                                 float(shape_params["minor_px"]) ** 2]) @ transform.T
+    if not np.isfinite(model).all():
+        return None
+    values, vectors = np.linalg.eigh(model)
+    if values[0] <= 0 or np.isclose(values[0], values[1], rtol=1e-5, atol=1e-8):
+        return None
+    direction = vectors[:, -1]
+    return normalize_axis_angle_deg(float(np.rad2deg(np.arctan2(direction[1], direction[0]))))
+
+
+def detection_roundness_display(detection, config: MeasurementConfig) -> tuple[float | None, float | None]:
+    """Select the ROI's own roundness and major-axis angle for one detail column."""
+    if detection.fitting_mode == "Ellipse":
+        value = detection.ellipse_roundness_um
+        if value is None:
+            value = ellipse_metrics_um(detection.shape_params, config).get("ellipse_roundness_um")
+        return value, ellipse_major_axis_angle_deg(detection.shape_params, config)
+    if detection.fitting_mode in {"Circle", "CaliperCircle", "ProductionCircle", "AutoCircle"}:
+        return detection.shape_params.get("ellipse_roundness_um"), detection.shape_params.get("roundness_angle_deg")
+    return None, None
+
+
 def radial_diameter_residual_um(
     points_xy: Iterable[tuple[float, float]] | np.ndarray,
     center_x_px: float,

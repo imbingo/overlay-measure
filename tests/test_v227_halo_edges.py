@@ -37,7 +37,11 @@ def test_halo_center_axes_and_export(shape, polarity):
         row = build_detection_rows({'Mark1': {'upper': result}}, {}, config)[0]
         assert row['ellipse_roundness_um'] == result.ellipse_roundness_um
     else:
-        assert result.ellipse_roundness_um is None
+        # Circular ROIs now report the supplementary ellipse model too.
+        assert result.ellipse_roundness_um == pytest.approx(0., abs=0.1)
+        row = build_detection_rows({'Mark1': {'upper': result}}, {}, config)[0]
+        assert row['ellipse_roundness_um'] == result.ellipse_roundness_um
+        assert -90 <= row['roundness_angle_deg'] < 90
 
 
 def test_rotated_ellipse_mask_matches_roi():

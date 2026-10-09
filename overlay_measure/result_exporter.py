@@ -10,7 +10,7 @@ from openpyxl.drawing.image import Image as XlsxImage
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .measurement_units import ellipse_metrics_um, mean_pixel_size_um, rotated_rect_size_um, scalar_px_to_um
+from .measurement_units import detection_roundness_display, ellipse_metrics_um, mean_pixel_size_um, rotated_rect_size_um, scalar_px_to_um
 from .geometry_models import GeometryRunResult
 from .models import DetectionResult, MeasurementConfig, OverlayResult
 from .quality_profiles import quality_profile_display
@@ -37,7 +37,6 @@ DETAIL_COLUMNS = {
     "maximum_diameter_um": "最大直径(μm)",
     "minimum_diameter_um": "最小直径(μm)",
     "diameter_pv_um": "直径PV(μm)",
-    "roundness_um": "圆度(μm)",
     "diameter_mode": "直径定义",
     "fit_residual_um": "参考残差(μm)",
     "edge_point_count": "边缘点数",
@@ -64,6 +63,7 @@ DETAIL_COLUMNS = {
     "shape_minor_um": "短轴(μm)",
     "ellipse_diameter_um": "椭圆直径(μm)",
     "ellipse_roundness_um": "椭圆圆度(μm)",
+    "roundness_angle_deg": "长轴角度(°)",
     "shape_angle_deg": "角度(°)",
     "shape_aspect_ratio": "宽高比",
     "roi_type": "ROI类型",
@@ -164,6 +164,7 @@ def build_detection_rows(
             major_px = det.shape_params.get("major_px")
             minor_px = det.shape_params.get("minor_px")
             ellipse_metrics = ellipse_metrics_um(det.shape_params, config) if det.fitting_mode == "Ellipse" else {}
+            display_roundness, axis_angle = detection_roundness_display(det, config)
             row = {
                 "timestamp": now,
                 "run_index": run_index,
@@ -214,7 +215,8 @@ def build_detection_rows(
                 "shape_major_um": det.ellipse_major_um if det.ellipse_major_um is not None else ellipse_metrics.get("ellipse_major_um"),
                 "shape_minor_um": det.ellipse_minor_um if det.ellipse_minor_um is not None else ellipse_metrics.get("ellipse_minor_um"),
                 "ellipse_diameter_um": det.ellipse_diameter_um if det.ellipse_diameter_um is not None else ellipse_metrics.get("ellipse_diameter_um"),
-                "ellipse_roundness_um": det.ellipse_roundness_um if det.ellipse_roundness_um is not None else ellipse_metrics.get("ellipse_roundness_um"),
+                "ellipse_roundness_um": display_roundness,
+                "roundness_angle_deg": axis_angle,
                 "shape_angle_deg": det.shape_params.get("angle_deg"),
                 "shape_aspect_ratio": det.shape_params.get("aspect_ratio"),
                 "roi_type": _roi_cn(det.shape_params.get("roi_type")),
@@ -361,7 +363,7 @@ def export_results(
     traceability_info: Optional[dict] = None,
     geometry_rows: Optional[List[dict]] = None,
 ) -> None:
-    detail_df = pd.DataFrame(rows).rename(columns=DETAIL_COLUMNS)
+    detail_df = pd.DataFrame(rows).drop(columns=["roundness_um"], errors="ignore").rename(columns=DETAIL_COLUMNS)
     summary_df = pd.DataFrame(summary_rows or [])
     repeatability_df = pd.DataFrame(repeatability_rows or [])
     geometry_df = pd.DataFrame(geometry_rows or [])
@@ -408,7 +410,8 @@ def export_results(
             {"项目": "角度补偿公式", "内容": "ΔX=原始ΔX+厚度×Ry/1000；ΔY=原始ΔY-厚度×Rx/1000"},
             {"项目": "椭圆直径定义", "内容": "(物理长轴+物理短轴)/2"},
             {"项目": "椭圆圆度定义", "内容": "(物理长轴-物理短轴)/2；非 ISO 最小区域圆度"},
-            {"项目": "卡尺圆圆度定义", "内容": "RANSAC有效轮廓点 → 标定物理半径 → 最大半径 - 最小半径；单位μm"},
+            {"项目": "圆形ROI椭圆圆度定义", "内容": "最终有效轮廓点 → 物理坐标椭圆拟合 → (长轴 - 短轴) / 2；单位μm"},
+            {"项目": "长轴角度定义", "内容": "物理长轴与X轴夹角，[-90°, 90°)；图像Y向下，顺时针为正；理想圆留空"},
             {"项目": "Rz分布方向", "内容": config.rz_layout},
             {"项目": "Rz单位", "内容": "μrad"},
             {"项目": "Mark间距L(μm)", "内容": config.rz_distance_l_um},
