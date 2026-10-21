@@ -418,6 +418,7 @@ class MainWindow(
             self.import_lower_btn: "导入下层" if compact else "导入下层图像",
             self.analyze_all_btn: "运行" if compact else "运行测量程序",
             self.export_btn: "导出" if compact else "导出结果",
+            self.soma_diagnostics_btn: "诊断" if compact else "成像诊断",
         }
         for button, text in labels.items():
             button.setText(text)

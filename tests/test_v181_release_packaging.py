@@ -35,8 +35,8 @@ def test_release_metadata_contains_hash_and_full_installer_policy(tmp_path):
     manifest = tmp_path / "update_manifest.json"
     version_info = tmp_path / "version_info.txt"
 
-    # Intentional v2.5.1 entry-point fix; measurement golden expectations are unchanged.
-    assert version_tuple(__version__) == (2, 5, 1, 0)
+    # Intentional v2.6.0 workflow simplification; measurement golden expectations are unchanged.
+    assert version_tuple(__version__) == (2, 6, 0, 0)
     write_version_info(version_info, __version__)
     write_manifest(manifest, artifact, __version__)
 

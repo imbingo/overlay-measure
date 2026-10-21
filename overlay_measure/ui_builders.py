@@ -308,6 +308,9 @@ class MainWindowBuilderMixin:
             self.more_actions_menu.addSeparator()
             self.reset_measurement_action = self.more_actions_menu.addAction("重置测量")
             self.more_actions_btn.setMenu(self.more_actions_menu)
+            self.soma_diagnostics_btn = QPushButton("成像诊断")
+            self.soma_diagnostics_btn.setToolTip("直接查看主页面上下层轮廓：自动配准、边缘叠加、局部位移与灰度梯度")
+            self.soma_diagnostics_btn.clicked.connect(self.start_soma_diagnostics)
 
             command_layout.addWidget(self.image_mode_label)
             command_layout.addWidget(self.mode_combo)
@@ -325,6 +328,7 @@ class MainWindowBuilderMixin:
             command_layout.addStretch(1)
             command_layout.addWidget(self.more_actions_btn)
             command_layout.addWidget(self.analyze_roi_btn)
+            command_layout.addWidget(self.soma_diagnostics_btn)
             command_layout.addWidget(self.analyze_all_btn)
             command_layout.addWidget(self.export_btn)
             root.addWidget(command_bar)

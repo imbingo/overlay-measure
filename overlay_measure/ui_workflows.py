@@ -179,11 +179,13 @@ class MainWindowWorkflowMixin:
             if self.operation_mode != "Engineering" or self._calculation_running:
                 QMessageBox.information(self, "成像诊断", "请在工程模式且正式测量空闲时打开。")
                 return
-            from .diagnostics.ui_diagnostics import DiagnosticsDialog
+            from .diagnostics.ui_measurement_diagnostics import MeasurementDiagnosticsDialog
             dialog = getattr(self, "_soma_diagnostics_dialog", None)
             if dialog is None:
-                dialog = DiagnosticsDialog(self.params, self.config, self)
+                dialog = MeasurementDiagnosticsDialog(self.params, self.config, self)
                 self._soma_diagnostics_dialog = dialog
+            else:
+                dialog.sync_main()
             dialog.show()
             dialog.raise_()
             dialog.activateWindow()

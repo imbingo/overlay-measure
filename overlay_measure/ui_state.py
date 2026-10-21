@@ -161,6 +161,8 @@ class MainWindowStateMixin:
                 return
             engineering = self.operation_mode == "Engineering"
             self.more_actions_btn.setVisible(engineering)
+            self.soma_diagnostics_btn.setVisible(engineering)
+            self.soma_diagnostics_btn.setEnabled(engineering and not self._calculation_running)
             self.image_mode_label.setVisible(True)
             self.mode_combo.setVisible(True)
             self.display_enhance_check.setVisible(True)

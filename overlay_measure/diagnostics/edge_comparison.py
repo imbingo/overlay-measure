@@ -88,6 +88,8 @@ def compare_edges(
     ids_a=None,
     ids_b=None,
     planned_count=None,
+    max_gap_a_deg=None,
+    max_gap_b_deg=None,
 ):
     if count < 8 or not 0 < max_gap_deg <= 30:
         raise ValueError("角采样和最大角间隙不合法")
@@ -99,8 +101,12 @@ def compare_edges(
             raise ValueError("形状比较需要 B 圆心")
         b = b + center_a - np.asarray(center_b, np.float64)
     angles = np.linspace(0, 360, count, endpoint=False)
-    pa = radial_intersections(a, center_a, angles, max_gap_deg, ids_a, planned_count)
-    pb = radial_intersections(b, center_a, angles, max_gap_deg, ids_b, planned_count)
+    pa = radial_intersections(
+        a, center_a, angles, max_gap_a_deg or max_gap_deg, ids_a, planned_count
+    )
+    pb = radial_intersections(
+        b, center_a, angles, max_gap_b_deg or max_gap_deg, ids_b, planned_count
+    )
     ra = np.linalg.norm(pa - center_a, axis=1)
     rb = np.linalg.norm(pb - center_a, axis=1)
     valid = np.isfinite(ra) & np.isfinite(rb)

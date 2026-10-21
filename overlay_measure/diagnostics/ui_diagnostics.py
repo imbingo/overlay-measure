@@ -222,14 +222,21 @@ class DiagnosticCanvas(ImageCanvas):
         if comp.valid[i]:
             xy = comp.points_a_um[i] / [cal.x, cal.y]
             if self.owner.mode == 2 and self.owner.profile is not None:
-                edge = result.trace_a[self.owner.profile["caliper_id"]]["selected"]
-                if edge is not None:
-                    xy = [edge["x"], edge["y"]]
+                if 'edge_a_frame_px' in self.owner.profile:
+                    xy=self.owner.profile['edge_a_frame_px']
+                else:
+                    edge = result.trace_a[self.owner.profile["caliper_id"]]["selected"]
+                    if edge is not None:
+                        xy = [edge["x"], edge["y"]]
             selected = point(xy)
             p.setPen(QPen(QColor("#FFFFFF"), 1.5))
             p.setBrush(Qt.NoBrush)
             p.drawEllipse(selected, 10, 10)
             if self.owner.mode == 2:
+                if self.owner.profile is not None and 'sampling_line_frame_px' in self.owner.profile:
+                    start,end=self.owner.profile['sampling_line_frame_px']
+                    p.setPen(QPen(QColor('#FFFFFF'),1,Qt.DashLine));p.drawLine(point(start),point(end))
+                    p.end();return
                 trace = (
                     result.trace_a[self.owner.profile["caliper_id"]]
                     if self.owner.profile is not None
@@ -337,7 +344,7 @@ class ComparisonChart(QWidget):
                     p,
                     r,
                     limits,
-                    "原灰度 / 平滑灰度 DN" if k == 0 else "梯度 DN/μm · 虚线为算法选峰",
+                    "原灰度 / 平滑灰度 DN" if k == 0 else getattr(o,'profile_marker_title',"梯度 DN/μm · 虚线为算法选峰"),
                 )
                 p.save()
                 p.setClipRect(r)
