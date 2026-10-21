@@ -348,6 +348,24 @@ def _style_sheet(ws, fail_columns: Optional[List[str]] = None):
     _autosize(ws)
 
 
+def export_data_tables(path: str, tables: dict[str, list[dict]]) -> None:
+    """Full-precision engineering tables; production export_results stays unchanged.
+
+    XLSX contains all tables. CSV path denotes a directory with one UTF-8 BOM
+    CSV per table, avoiding silent loss of point/angle/traceability tables.
+    """
+    target = Path(path)
+    if target.suffix.lower() == '.xlsx':
+        with pd.ExcelWriter(target, engine='openpyxl') as writer:
+            for name, rows in tables.items():
+                pd.DataFrame(rows).to_excel(writer, index=False, sheet_name=name[:31])
+                _style_sheet(writer.book[name[:31]])
+    else:
+        target.mkdir(parents=True, exist_ok=True)
+        for name, rows in tables.items():
+            pd.DataFrame(rows).to_csv(target / f'{name}.csv', index=False, encoding='utf-8-sig')
+
+
 def resize_dimensions_preserving_aspect(width: float, height: float, max_width: float, max_height: float) -> tuple[int, int]:
     scale = min(max_width / max(width, 1.0), max_height / max(height, 1.0), 1.0)
     return int(round(width * scale)), int(round(height * scale))

@@ -302,6 +302,8 @@ class MainWindowBuilderMixin:
             self.display_enhance_action.setCheckable(True)
             self.fit_view_action = self.more_actions_menu.addAction("适应窗口")
             self.image_diagnostics_action = self.more_actions_menu.addAction("图像诊断与边缘分析")
+            self.soma_diagnostics_action = self.more_actions_menu.addAction("SOMA Diagnostics / 成像诊断")
+            self.soma_diagnostics_action.triggered.connect(self.start_soma_diagnostics)
             self.more_actions_menu.addSeparator()
             self.reset_measurement_action = self.more_actions_menu.addAction("重置测量")
             self.more_actions_btn.setMenu(self.more_actions_menu)

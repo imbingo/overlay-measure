@@ -1,0 +1,3204 @@
+{
+  "source_commit": "d4f7a3e70999f0f99a6207a40f8d047bf7b8eb9e",
+  "input_sha256": "1519c6e106a11058e68a0bee3f00613c17e2a869bfe2d1009c4a937c9a3cd2e7",
+  "roi": {
+    "x": 35,
+    "y": 24,
+    "w": 108,
+    "h": 108,
+    "roi_type": "Caliper Circle",
+    "inner_ratio": 0.65,
+    "target_edge": "Strongest Edge",
+    "angle_deg": 0.0,
+    "caliper_count": 48,
+    "caliper_width_px": 4,
+    "search_direction": "Inner to Outer",
+    "diameter_mode": "Average"
+  },
+  "params": {
+    "gaussian_sigma_px": 1.0,
+    "canny_low": 40.0,
+    "canny_high": 120.0,
+    "min_gradient": 20,
+    "profile_half_width_px": 2.0,
+    "profile_step_px": 0.25,
+    "fitting_mode": "EdgeCenter",
+    "upper_fitting_mode": "EdgeCenter",
+    "lower_fitting_mode": "EdgeCenter",
+    "use_ransac": true,
+    "residual_limit_px": 2.0,
+    "min_edge_points": 60,
+    "diameter_min_um": 0.0,
+    "diameter_max_um": 999999.0,
+    "polarity": "Auto",
+    "measurement_timeout_s": 180,
+    "max_edge_points": 2000,
+    "auto_max_candidates": 128,
+    "auto_max_contours_per_mask": 256,
+    "auto_time_limit_s": 12.0,
+    "auto_array_mode": true,
+    "auto_refine_roi_type": "Caliper Circle"
+  },
+  "config": {
+    "mode": "Single Image",
+    "workflow_mode": "Manual",
+    "recipe_name": "",
+    "recipe_version": "1.0",
+    "recipe_validation_status": "Draft",
+    "auto_reference_label": "",
+    "auto_target_label": "",
+    "material_code": "",
+    "process_name": "",
+    "equipment_model": "",
+    "calibration_date": "",
+    "operator_name": "",
+    "pixel_size_x_um": 0.1,
+    "pixel_size_y_um": 0.1,
+    "registration_offset_x_um": 0.0,
+    "registration_offset_y_um": 0.0,
+    "rx_angle_urad": 0.0,
+    "ry_angle_urad": 0.0,
+    "material_thickness_mm": 0.0,
+    "overlay_definition": "upper_minus_lower",
+    "delta_x_limit_um": 0.5,
+    "delta_y_limit_um": 0.5,
+    "overlay_r_limit_um": 0.7,
+    "quality_profile": "Standard",
+    "confidence_min": 0.7,
+    "rz_layout": "Y向前后分布",
+    "rz_distance_l_um": 1.0,
+    "rz_limit": 999999.0,
+    "production_caliper_count": 64,
+    "production_caliper_width_px": 8.0,
+    "production_search_half_width_px": 8.0,
+    "production_min_coverage": 0.65,
+    "production_max_rejected_ratio": 0.4,
+    "production_max_residual_um": 0.3,
+    "production_max_radial_deviation_um": 0.6
+  },
+  "caliper": {
+    "center_x_px": 88.30488549246671,
+    "center_y_px": 77.6933033266404,
+    "radius_px": 45.15894824548818,
+    "residual_px": 0.08688039577690898,
+    "confidence": 0.9372069543695644,
+    "edge_points": [
+      [
+        133.47500399859248,
+        78.0
+      ],
+      [
+        133.07336762442475,
+        83.802368924843
+      ],
+      [
+        131.9221711016979,
+        89.50096108409042
+      ],
+      [
+        130.03242468763074,
+        94.99618680266927
+      ],
+      [
+        127.43655730904098,
+        100.19135670909728
+      ],
+      [
+        124.24665014139177,
+        105.04570588934234
+      ],
+      [
+        120.45001159880185,
+        109.45001159880185
+      ],
+      [
+        116.08906952417401,
+        113.30316273056302
+      ],
+      [
+        111.27772284083986,
+        116.58614783727228
+      ],
+      [
+        106.07315458943091,
+        119.21824136229655
+      ],
+      [
+        100.56004544548743,
+        121.14267694036431
+      ],
+      [
+        94.84977977235579,
+        122.43348876440784
+      ],
+      [
+        89.0,
+        122.475
+      ],
+      [
+        83.13870030858422,
+        122.52099123698603
+      ],
+      [
+        77.34076874202295,
+        121.5128434319656
+      ],
+      [
+        71.7263164695163,
+        119.70236105143452
+      ],
+      [
+        66.34968666288209,
+        117.23149350724321
+      ],
+      [
+        61.39299393649496,
+        113.97815077014079
+      ],
+      [
+        56.8493294421711,
+        110.15067055782892
+      ],
+      [
+        52.88334304453021,
+        105.71328559751001
+      ],
+      [
+        49.43140914994928,
+        100.84493657873094
+      ],
+      [
+        46.80033463074781,
+        95.47967372355049
+      ],
+      [
+        44.807295148384156,
+        89.84139957633744
+      ],
+      [
+        43.531749252377935,
+        83.98600877185444
+      ],
+      [
+        43.525,
+        78.0
+      ],
+      [
+        43.49200616220469,
+        72.00875895106243
+      ],
+      [
+        44.67721933396771,
+        66.12374671423487
+      ],
+      [
+        46.57139249201634,
+        60.425495337588245
+      ],
+      [
+        49.251111636000346,
+        55.05096860305644
+      ],
+      [
+        52.57586313829793,
+        50.05077677217673
+      ],
+      [
+        56.56210559507093,
+        45.56210559507097
+      ],
+      [
+        61.10111628669185,
+        41.64146687087057
+      ],
+      [
+        66.09615857418736,
+        38.32938296199173
+      ],
+      [
+        71.51744289168184,
+        35.7933735241361
+      ],
+      [
+        77.1876379198399,
+        33.915664559442504
+      ],
+      [
+        83.0334801807471,
+        32.679782544253726
+      ],
+      [
+        89.0,
+        32.525
+      ],
+      [
+        94.92076750277242,
+        33.0273058903268
+      ],
+      [
+        100.73204277898225,
+        34.21542027226656
+      ],
+      [
+        106.27578509809649,
+        36.29256531553237
+      ],
+      [
+        111.5449033702569,
+        38.95108191098424
+      ],
+      [
+        116.36968998132394,
+        42.331125569540816
+      ],
+      [
+        120.73405490939477,
+        46.265945090605214
+      ],
+      [
+        124.53465676146612,
+        50.73329885835798
+      ],
+      [
+        127.70524560893679,
+        55.65351602862974
+      ],
+      [
+        130.2245586484103,
+        60.9242287049834
+      ],
+      [
+        132.03733696522963,
+        66.46818031578057
+      ],
+      [
+        133.25335229428345,
+        72.17393564384267
+      ]
+    ],
+    "rejected_points": [],
+    "gradients": [
+      9538.57421875,
+      9333.5234375,
+      9415.9296875,
+      9424.81640625,
+      9416.16796875,
+      9406.234375,
+      9376.84765625,
+      9401.30859375,
+      9420.2890625,
+      9422.4921875,
+      9408.28515625,
+      9457.4765625,
+      9375.46875,
+      9469.69140625,
+      9362.09375,
+      9422.75390625,
+      9415.94921875,
+      9408.84375,
+      9397.59765625,
+      9406.015625,
+      9393.35546875,
+      9390.0625,
+      9400.05859375,
+      9470.875,
+      9372.6953125,
+      9481.6875,
+      9386.80078125,
+      9384.859375,
+      9430.01171875,
+      9403.640625,
+      9398.3125,
+      9404.421875,
+      9440.5234375,
+      9388.34375,
+      9414.328125,
+      9365.7578125,
+      9538.69140625,
+      9347.94921875,
+      9388.9140625,
+      9420.9921875,
+      9368.34765625,
+      9396.33984375,
+      9413.83203125,
+      9410.4921875,
+      9414.8125,
+      9422.8671875,
+      9421.62890625,
+      9358.546875
+    ],
+    "rejected_gradients": [],
+    "inlier_mask": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "caliper_windows": [
+      {
+        "angle": 0.0,
+        "center_x": 133.55,
+        "center_y": 78.0,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9538.57421875,
+        "candidate_count": 14,
+        "accepted": true,
+        "selected_radius": 44.4750039985925
+      },
+      {
+        "angle": 0.1308996938995747,
+        "center_x": 133.16886857420326,
+        "center_y": 83.81494186340329,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9333.5234375,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.45367497629048
+      },
+      {
+        "angle": 0.2617993877991494,
+        "center_x": 132.031995561178,
+        "center_y": 89.5303884593173,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9415.9296875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.43630135307383
+      },
+      {
+        "angle": 0.39269908169872414,
+        "center_x": 130.15883317337781,
+        "center_y": 95.04854691186475,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9424.81640625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.41317644097659
+      },
+      {
+        "angle": 0.5235987755982988,
+        "center_x": 127.58143173859673,
+        "center_y": 100.27499999999999,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9416.16796875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.382713418194555
+      },
+      {
+        "angle": 0.6544984694978736,
+        "center_x": 124.34389130997452,
+        "center_y": 105.12032166233851,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9406.234375,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.42743018949531
+      },
+      {
+        "angle": 0.7853981633974483,
+        "center_x": 120.50160710186069,
+        "center_y": 109.50160710186069,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9376.84765625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.47703293981672
+      },
+      {
+        "angle": 0.916297857297023,
+        "center_x": 116.12032166233851,
+        "center_y": 113.34389130997452,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9401.30859375,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.49866274918996
+      },
+      {
+        "angle": 1.0471975511965976,
+        "center_x": 111.275,
+        "center_y": 116.58143173859673,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9420.2890625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.555445681679686
+      },
+      {
+        "angle": 1.1780972450961724,
+        "center_x": 106.04854691186475,
+        "center_y": 119.15883317337781,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9422.4921875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.61430296031913
+      },
+      {
+        "angle": 1.3089969389957472,
+        "center_x": 100.5303884593173,
+        "center_y": 121.031995561178,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9408.28515625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.66458579548652
+      },
+      {
+        "angle": 1.4398966328953218,
+        "center_x": 94.8149418634033,
+        "center_y": 122.16886857420326,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9457.4765625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.81690358739457
+      },
+      {
+        "angle": 1.5707963267948966,
+        "center_x": 89.0,
+        "center_y": 122.55,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9375.46875,
+        "candidate_count": 14,
+        "accepted": true,
+        "selected_radius": 44.475
+      },
+      {
+        "angle": 1.7016960206944713,
+        "center_x": 83.1850581365967,
+        "center_y": 122.16886857420326,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9469.69140625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.905161115359306
+      },
+      {
+        "angle": 1.832595714594046,
+        "center_x": 77.4696115406827,
+        "center_y": 121.031995561178,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9362.09375,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.04781034702731
+      },
+      {
+        "angle": 1.9634954084936205,
+        "center_x": 71.95145308813527,
+        "center_y": 119.15883317337783,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9422.75390625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.138310335850036
+      },
+      {
+        "angle": 2.0943951023931953,
+        "center_x": 66.72500000000001,
+        "center_y": 116.58143173859673,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9415.94921875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.30062667423584
+      },
+      {
+        "angle": 2.2252947962927703,
+        "center_x": 61.879678337661495,
+        "center_y": 113.34389130997452,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9408.84375,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.34946655286461
+      },
+      {
+        "angle": 2.356194490192345,
+        "center_x": 57.498392898139315,
+        "center_y": 109.50160710186069,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9397.59765625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.46791434227101
+      },
+      {
+        "angle": 2.4870941840919194,
+        "center_x": 53.656108690025484,
+        "center_y": 105.12032166233851,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9406.015625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.52404977864162
+      },
+      {
+        "angle": 2.6179938779914944,
+        "center_x": 50.41856826140326,
+        "center_y": 100.27499999999999,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9393.35546875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.68987315746189
+      },
+      {
+        "angle": 2.748893571891069,
+        "center_x": 47.84116682662218,
+        "center_y": 95.04854691186475,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9390.0625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.676588650627615
+      },
+      {
+        "angle": 2.8797932657906435,
+        "center_x": 45.968004438822014,
+        "center_y": 89.53038845931731,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9400.05859375,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.751654680771
+      },
+      {
+        "angle": 3.010692959690218,
+        "center_x": 44.83113142579675,
+        "center_y": 83.81494186340332,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9470.875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.86059449097179
+      },
+      {
+        "angle": 3.141592653589793,
+        "center_x": 44.45,
+        "center_y": 78.0,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9372.6953125,
+        "candidate_count": 15,
+        "accepted": true,
+        "selected_radius": 45.475
+      },
+      {
+        "angle": 3.272492347489368,
+        "center_x": 44.83113142579675,
+        "center_y": 72.1850581365967,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9481.6875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.90068052270348
+      },
+      {
+        "angle": 3.4033920413889427,
+        "center_x": 45.96800443882201,
+        "center_y": 66.4696115406827,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9386.80078125,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.88631907308378
+      },
+      {
+        "angle": 3.5342917352885173,
+        "center_x": 47.84116682662217,
+        "center_y": 60.95145308813525,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9384.859375,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.92439383590882
+      },
+      {
+        "angle": 3.665191429188092,
+        "center_x": 50.41856826140325,
+        "center_y": 55.72500000000001,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9430.01171875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.89806279388715
+      },
+      {
+        "angle": 3.796091123087667,
+        "center_x": 53.65610869002548,
+        "center_y": 50.879678337661495,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9403.640625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.911619718309865
+      },
+      {
+        "angle": 3.926990816987241,
+        "center_x": 57.49839289813929,
+        "center_y": 46.49839289813933,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9398.3125,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.874110202276995
+      },
+      {
+        "angle": 4.057890510886816,
+        "center_x": 61.87967833766149,
+        "center_y": 42.656108690025484,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9404.421875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.82892802314596
+      },
+      {
+        "angle": 4.1887902047863905,
+        "center_x": 66.72499999999998,
+        "center_y": 39.418568261403266,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9440.5234375,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.80768285162526
+      },
+      {
+        "angle": 4.319689898685966,
+        "center_x": 71.95145308813527,
+        "center_y": 36.84116682662217,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9388.34375,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.684123298129535
+      },
+      {
+        "angle": 4.4505895925855405,
+        "center_x": 77.4696115406827,
+        "center_y": 34.96800443882201,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9414.328125,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.63946241081721
+      },
+      {
+        "angle": 4.581489286485115,
+        "center_x": 83.1850581365967,
+        "center_y": 33.83113142579675,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9365.7578125,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.711283825655855
+      },
+      {
+        "angle": 4.71238898038469,
+        "center_x": 88.99999999999999,
+        "center_y": 33.45,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9538.69140625,
+        "candidate_count": 14,
+        "accepted": true,
+        "selected_radius": 45.475
+      },
+      {
+        "angle": 4.843288674284264,
+        "center_x": 94.81494186340328,
+        "center_y": 33.83113142579675,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9347.94921875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.36076171432883
+      },
+      {
+        "angle": 4.974188368183839,
+        "center_x": 100.53038845931728,
+        "center_y": 34.96800443882201,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9388.9140625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.32913246138862
+      },
+      {
+        "angle": 5.105088062083413,
+        "center_x": 106.04854691186472,
+        "center_y": 36.84116682662217,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9420.9921875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.14380199667222
+      },
+      {
+        "angle": 5.235987755982989,
+        "center_x": 111.275,
+        "center_y": 39.418568261403266,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9368.34765625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 45.08980674051379
+      },
+      {
+        "angle": 5.3668874498825625,
+        "center_x": 116.12032166233847,
+        "center_y": 42.65610869002545,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9396.33984375,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.95963225838986
+      },
+      {
+        "angle": 5.497787143782138,
+        "center_x": 120.50160710186069,
+        "center_y": 46.4983928981393,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9413.83203125,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.8787308419586
+      },
+      {
+        "angle": 5.6286868376817125,
+        "center_x": 124.34389130997451,
+        "center_y": 50.87967833766148,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9410.4921875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.79045458915139
+      },
+      {
+        "angle": 5.759586531581287,
+        "center_x": 127.58143173859673,
+        "center_y": 55.72499999999998,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9414.8125,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.692967942740495
+      },
+      {
+        "angle": 5.8904862254808625,
+        "center_x": 130.15883317337784,
+        "center_y": 60.95145308813526,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9422.8671875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.621140741535655
+      },
+      {
+        "angle": 6.021385919380436,
+        "center_x": 132.03199556117798,
+        "center_y": 66.46961154068266,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9421.62890625,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.555529828384635
+      },
+      {
+        "angle": 6.152285613280012,
+        "center_x": 133.16886857420326,
+        "center_y": 72.1850581365967,
+        "length": 18.9,
+        "width": 4.0,
+        "gradient": 9358.546875,
+        "candidate_count": 1,
+        "accepted": true,
+        "selected_radius": 44.63521272677042
+      }
+    ],
+    "average_diameter_px": 90.31789649097637,
+    "maximum_diameter_px": 90.52818526233942,
+    "minimum_diameter_px": 89.56187152059475,
+    "diameter_pv_px": 0.9663137417446706,
+    "angular_coverage": 0.9788166331782444,
+    "maximum_gap_deg": 7.626012055832033
+  },
+  "manual": {
+    "mark_id": "baseline",
+    "layer": "upper",
+    "center_x_px": 88.30488549246671,
+    "center_y_px": 77.6933033266404,
+    "center_x_um": 8.830488549246672,
+    "center_y_um": 7.76933033266404,
+    "diameter_px": 90.31789649097637,
+    "diameter_um": 9.031789649097638,
+    "residual_px": 0.08688039577690898,
+    "residual_um": 0.008625027331529164,
+    "edge_point_count": 48,
+    "confidence": 0.9372069543695644,
+    "fitting_mode": "CaliperCircle",
+    "warning": "",
+    "edge_points": [
+      [
+        133.47500399859248,
+        78.0
+      ],
+      [
+        133.07336762442475,
+        83.802368924843
+      ],
+      [
+        131.9221711016979,
+        89.50096108409042
+      ],
+      [
+        130.03242468763074,
+        94.99618680266927
+      ],
+      [
+        127.43655730904098,
+        100.19135670909728
+      ],
+      [
+        124.24665014139177,
+        105.04570588934234
+      ],
+      [
+        120.45001159880185,
+        109.45001159880185
+      ],
+      [
+        116.08906952417401,
+        113.30316273056302
+      ],
+      [
+        111.27772284083986,
+        116.58614783727228
+      ],
+      [
+        106.07315458943091,
+        119.21824136229655
+      ],
+      [
+        100.56004544548743,
+        121.14267694036431
+      ],
+      [
+        94.84977977235579,
+        122.43348876440784
+      ],
+      [
+        89.0,
+        122.475
+      ],
+      [
+        83.13870030858422,
+        122.52099123698603
+      ],
+      [
+        77.34076874202295,
+        121.5128434319656
+      ],
+      [
+        71.7263164695163,
+        119.70236105143452
+      ],
+      [
+        66.34968666288209,
+        117.23149350724321
+      ],
+      [
+        61.39299393649496,
+        113.97815077014079
+      ],
+      [
+        56.8493294421711,
+        110.15067055782892
+      ],
+      [
+        52.88334304453021,
+        105.71328559751001
+      ],
+      [
+        49.43140914994928,
+        100.84493657873094
+      ],
+      [
+        46.80033463074781,
+        95.47967372355049
+      ],
+      [
+        44.807295148384156,
+        89.84139957633744
+      ],
+      [
+        43.531749252377935,
+        83.98600877185444
+      ],
+      [
+        43.525,
+        78.0
+      ],
+      [
+        43.49200616220469,
+        72.00875895106243
+      ],
+      [
+        44.67721933396771,
+        66.12374671423487
+      ],
+      [
+        46.57139249201634,
+        60.425495337588245
+      ],
+      [
+        49.251111636000346,
+        55.05096860305644
+      ],
+      [
+        52.57586313829793,
+        50.05077677217673
+      ],
+      [
+        56.56210559507093,
+        45.56210559507097
+      ],
+      [
+        61.10111628669185,
+        41.64146687087057
+      ],
+      [
+        66.09615857418736,
+        38.32938296199173
+      ],
+      [
+        71.51744289168184,
+        35.7933735241361
+      ],
+      [
+        77.1876379198399,
+        33.915664559442504
+      ],
+      [
+        83.0334801807471,
+        32.679782544253726
+      ],
+      [
+        89.0,
+        32.525
+      ],
+      [
+        94.92076750277242,
+        33.0273058903268
+      ],
+      [
+        100.73204277898225,
+        34.21542027226656
+      ],
+      [
+        106.27578509809649,
+        36.29256531553237
+      ],
+      [
+        111.5449033702569,
+        38.95108191098424
+      ],
+      [
+        116.36968998132394,
+        42.331125569540816
+      ],
+      [
+        120.73405490939477,
+        46.265945090605214
+      ],
+      [
+        124.53465676146612,
+        50.73329885835798
+      ],
+      [
+        127.70524560893679,
+        55.65351602862974
+      ],
+      [
+        130.2245586484103,
+        60.9242287049834
+      ],
+      [
+        132.03733696522963,
+        66.46818031578057
+      ],
+      [
+        133.25335229428345,
+        72.17393564384267
+      ]
+    ],
+    "rejected_points": [],
+    "edge_gradients": [
+      9538.57421875,
+      9333.5234375,
+      9415.9296875,
+      9424.81640625,
+      9416.16796875,
+      9406.234375,
+      9376.84765625,
+      9401.30859375,
+      9420.2890625,
+      9422.4921875,
+      9408.28515625,
+      9457.4765625,
+      9375.46875,
+      9469.69140625,
+      9362.09375,
+      9422.75390625,
+      9415.94921875,
+      9408.84375,
+      9397.59765625,
+      9406.015625,
+      9393.35546875,
+      9390.0625,
+      9400.05859375,
+      9470.875,
+      9372.6953125,
+      9481.6875,
+      9386.80078125,
+      9384.859375,
+      9430.01171875,
+      9403.640625,
+      9398.3125,
+      9404.421875,
+      9440.5234375,
+      9388.34375,
+      9414.328125,
+      9365.7578125,
+      9538.69140625,
+      9347.94921875,
+      9388.9140625,
+      9420.9921875,
+      9368.34765625,
+      9396.33984375,
+      9413.83203125,
+      9410.4921875,
+      9414.8125,
+      9422.8671875,
+      9421.62890625,
+      9358.546875
+    ],
+    "rejected_gradients": [],
+    "shape_params": {
+      "radius_px": 45.15894824548818,
+      "average_diameter_px": 90.31789649097637,
+      "maximum_diameter_px": 90.52818526233942,
+      "minimum_diameter_px": 89.56187152059475,
+      "diameter_pv_px": 0.9663137417446706,
+      "average_diameter_um": 9.031789649097638,
+      "maximum_diameter_um": 9.052818741305042,
+      "minimum_diameter_um": 8.956187152059476,
+      "diameter_pv_um": 0.09663158924556647,
+      "ellipse_roundness_um": 0.0008749961853027344,
+      "contour_ellipse_major_um": 9.032733917236328,
+      "contour_ellipse_minor_um": 9.030983924865723,
+      "roundness_angle_deg": -60.70990562438965,
+      "roundness_um": 0.05401936076561853,
+      "angular_coverage": 0.9788166331782444,
+      "maximum_gap_deg": 7.626012055832033,
+      "diameter_definition": "robust_average_circle",
+      "diameter_mode": "Average",
+      "reported_diameter_um": 9.031789649097638,
+      "inlier_count": 48,
+      "rejected_count": 0,
+      "rejected_ratio": 0.0,
+      "coverage": 0.9788166331782444,
+      "max_deviation_um": 0.03780124851908084,
+      "caliper_count": 48,
+      "caliper_width_px": 4.0,
+      "search_direction": "Inner to Outer",
+      "roi_type": "Caliper Circle",
+      "roi_inner_ratio": 0.65,
+      "roi_inner_radius_px": 35.1,
+      "roi_outer_radius_px": 54.0,
+      "roi_target_edge": "Strongest Edge",
+      "roi_angle_deg": 0.0,
+      "caliper_windows": [
+        {
+          "angle": 0.0,
+          "center_x": 133.55,
+          "center_y": 78.0,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9538.57421875,
+          "candidate_count": 14,
+          "accepted": true,
+          "selected_radius": 44.4750039985925
+        },
+        {
+          "angle": 0.1308996938995747,
+          "center_x": 133.16886857420326,
+          "center_y": 83.81494186340329,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9333.5234375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.45367497629048
+        },
+        {
+          "angle": 0.2617993877991494,
+          "center_x": 132.031995561178,
+          "center_y": 89.5303884593173,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9415.9296875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.43630135307383
+        },
+        {
+          "angle": 0.39269908169872414,
+          "center_x": 130.15883317337781,
+          "center_y": 95.04854691186475,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9424.81640625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.41317644097659
+        },
+        {
+          "angle": 0.5235987755982988,
+          "center_x": 127.58143173859673,
+          "center_y": 100.27499999999999,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9416.16796875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.382713418194555
+        },
+        {
+          "angle": 0.6544984694978736,
+          "center_x": 124.34389130997452,
+          "center_y": 105.12032166233851,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9406.234375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.42743018949531
+        },
+        {
+          "angle": 0.7853981633974483,
+          "center_x": 120.50160710186069,
+          "center_y": 109.50160710186069,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9376.84765625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.47703293981672
+        },
+        {
+          "angle": 0.916297857297023,
+          "center_x": 116.12032166233851,
+          "center_y": 113.34389130997452,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9401.30859375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.49866274918996
+        },
+        {
+          "angle": 1.0471975511965976,
+          "center_x": 111.275,
+          "center_y": 116.58143173859673,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9420.2890625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.555445681679686
+        },
+        {
+          "angle": 1.1780972450961724,
+          "center_x": 106.04854691186475,
+          "center_y": 119.15883317337781,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9422.4921875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.61430296031913
+        },
+        {
+          "angle": 1.3089969389957472,
+          "center_x": 100.5303884593173,
+          "center_y": 121.031995561178,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9408.28515625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.66458579548652
+        },
+        {
+          "angle": 1.4398966328953218,
+          "center_x": 94.8149418634033,
+          "center_y": 122.16886857420326,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9457.4765625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.81690358739457
+        },
+        {
+          "angle": 1.5707963267948966,
+          "center_x": 89.0,
+          "center_y": 122.55,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9375.46875,
+          "candidate_count": 14,
+          "accepted": true,
+          "selected_radius": 44.475
+        },
+        {
+          "angle": 1.7016960206944713,
+          "center_x": 83.1850581365967,
+          "center_y": 122.16886857420326,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9469.69140625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.905161115359306
+        },
+        {
+          "angle": 1.832595714594046,
+          "center_x": 77.4696115406827,
+          "center_y": 121.031995561178,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9362.09375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.04781034702731
+        },
+        {
+          "angle": 1.9634954084936205,
+          "center_x": 71.95145308813527,
+          "center_y": 119.15883317337783,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9422.75390625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.138310335850036
+        },
+        {
+          "angle": 2.0943951023931953,
+          "center_x": 66.72500000000001,
+          "center_y": 116.58143173859673,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9415.94921875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.30062667423584
+        },
+        {
+          "angle": 2.2252947962927703,
+          "center_x": 61.879678337661495,
+          "center_y": 113.34389130997452,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9408.84375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.34946655286461
+        },
+        {
+          "angle": 2.356194490192345,
+          "center_x": 57.498392898139315,
+          "center_y": 109.50160710186069,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9397.59765625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.46791434227101
+        },
+        {
+          "angle": 2.4870941840919194,
+          "center_x": 53.656108690025484,
+          "center_y": 105.12032166233851,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9406.015625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.52404977864162
+        },
+        {
+          "angle": 2.6179938779914944,
+          "center_x": 50.41856826140326,
+          "center_y": 100.27499999999999,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9393.35546875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.68987315746189
+        },
+        {
+          "angle": 2.748893571891069,
+          "center_x": 47.84116682662218,
+          "center_y": 95.04854691186475,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9390.0625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.676588650627615
+        },
+        {
+          "angle": 2.8797932657906435,
+          "center_x": 45.968004438822014,
+          "center_y": 89.53038845931731,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9400.05859375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.751654680771
+        },
+        {
+          "angle": 3.010692959690218,
+          "center_x": 44.83113142579675,
+          "center_y": 83.81494186340332,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9470.875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.86059449097179
+        },
+        {
+          "angle": 3.141592653589793,
+          "center_x": 44.45,
+          "center_y": 78.0,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9372.6953125,
+          "candidate_count": 15,
+          "accepted": true,
+          "selected_radius": 45.475
+        },
+        {
+          "angle": 3.272492347489368,
+          "center_x": 44.83113142579675,
+          "center_y": 72.1850581365967,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9481.6875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.90068052270348
+        },
+        {
+          "angle": 3.4033920413889427,
+          "center_x": 45.96800443882201,
+          "center_y": 66.4696115406827,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9386.80078125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.88631907308378
+        },
+        {
+          "angle": 3.5342917352885173,
+          "center_x": 47.84116682662217,
+          "center_y": 60.95145308813525,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9384.859375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.92439383590882
+        },
+        {
+          "angle": 3.665191429188092,
+          "center_x": 50.41856826140325,
+          "center_y": 55.72500000000001,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9430.01171875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.89806279388715
+        },
+        {
+          "angle": 3.796091123087667,
+          "center_x": 53.65610869002548,
+          "center_y": 50.879678337661495,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9403.640625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.911619718309865
+        },
+        {
+          "angle": 3.926990816987241,
+          "center_x": 57.49839289813929,
+          "center_y": 46.49839289813933,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9398.3125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.874110202276995
+        },
+        {
+          "angle": 4.057890510886816,
+          "center_x": 61.87967833766149,
+          "center_y": 42.656108690025484,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9404.421875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.82892802314596
+        },
+        {
+          "angle": 4.1887902047863905,
+          "center_x": 66.72499999999998,
+          "center_y": 39.418568261403266,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9440.5234375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.80768285162526
+        },
+        {
+          "angle": 4.319689898685966,
+          "center_x": 71.95145308813527,
+          "center_y": 36.84116682662217,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9388.34375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.684123298129535
+        },
+        {
+          "angle": 4.4505895925855405,
+          "center_x": 77.4696115406827,
+          "center_y": 34.96800443882201,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9414.328125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.63946241081721
+        },
+        {
+          "angle": 4.581489286485115,
+          "center_x": 83.1850581365967,
+          "center_y": 33.83113142579675,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9365.7578125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.711283825655855
+        },
+        {
+          "angle": 4.71238898038469,
+          "center_x": 88.99999999999999,
+          "center_y": 33.45,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9538.69140625,
+          "candidate_count": 14,
+          "accepted": true,
+          "selected_radius": 45.475
+        },
+        {
+          "angle": 4.843288674284264,
+          "center_x": 94.81494186340328,
+          "center_y": 33.83113142579675,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9347.94921875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.36076171432883
+        },
+        {
+          "angle": 4.974188368183839,
+          "center_x": 100.53038845931728,
+          "center_y": 34.96800443882201,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9388.9140625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.32913246138862
+        },
+        {
+          "angle": 5.105088062083413,
+          "center_x": 106.04854691186472,
+          "center_y": 36.84116682662217,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9420.9921875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.14380199667222
+        },
+        {
+          "angle": 5.235987755982989,
+          "center_x": 111.275,
+          "center_y": 39.418568261403266,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9368.34765625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.08980674051379
+        },
+        {
+          "angle": 5.3668874498825625,
+          "center_x": 116.12032166233847,
+          "center_y": 42.65610869002545,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9396.33984375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.95963225838986
+        },
+        {
+          "angle": 5.497787143782138,
+          "center_x": 120.50160710186069,
+          "center_y": 46.4983928981393,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9413.83203125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.8787308419586
+        },
+        {
+          "angle": 5.6286868376817125,
+          "center_x": 124.34389130997451,
+          "center_y": 50.87967833766148,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9410.4921875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.79045458915139
+        },
+        {
+          "angle": 5.759586531581287,
+          "center_x": 127.58143173859673,
+          "center_y": 55.72499999999998,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9414.8125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.692967942740495
+        },
+        {
+          "angle": 5.8904862254808625,
+          "center_x": 130.15883317337784,
+          "center_y": 60.95145308813526,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9422.8671875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.621140741535655
+        },
+        {
+          "angle": 6.021385919380436,
+          "center_x": 132.03199556117798,
+          "center_y": 66.46961154068266,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9421.62890625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.555529828384635
+        },
+        {
+          "angle": 6.152285613280012,
+          "center_x": 133.16886857420326,
+          "center_y": 72.1850581365967,
+          "length": 18.9,
+          "width": 4.0,
+          "gradient": 9358.546875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 44.63521272677042
+        }
+      ],
+      "use_ransac": true,
+      "quality_profile": "Standard",
+      "quality_profile_label": "标准",
+      "quality_grade": "优秀（满足超精确）",
+      "quality_details": "置信度=0.937；残差=0.009 μm；覆盖率=97.9%；异常点=0.0%；最大偏差=0.038 μm",
+      "quality_status": "Valid",
+      "quality_gate_reasons": [],
+      "quality_gate_warning": "",
+      "quality_evaluation_version": 1,
+      "failure_reason": "",
+      "algorithm_path": "手动ROI → 三点/卡尺圆初始化 → 径向灰度峰值找边 → 同一圆周边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算；椭圆圆度：RANSAC有效轮廓点 → 物理坐标椭圆拟合 → (长轴 - 短轴) / 2；长轴角度[-90°, 90°)"
+    },
+    "ellipse_major_um": null,
+    "ellipse_minor_um": null,
+    "ellipse_diameter_um": null,
+    "ellipse_roundness_um": 0.0008749961853027344
+  },
+  "production": {
+    "mark_id": "baseline",
+    "layer": "upper",
+    "center_x_px": 88.31567283296155,
+    "center_y_px": 77.68407691754751,
+    "center_x_um": 8.831567283296156,
+    "center_y_um": 7.768407691754752,
+    "diameter_px": 90.21606788347219,
+    "diameter_um": 9.02160678834722,
+    "residual_px": 0.06646342518716182,
+    "residual_um": 0.0066279663007009415,
+    "edge_point_count": 64,
+    "confidence": 0.9521953524276533,
+    "fitting_mode": "ProductionCircle",
+    "warning": "试测/未验证配方",
+    "edge_points": [
+      [
+        133.58883546416428,
+        77.6933033266404
+      ],
+      [
+        133.23502207118148,
+        82.11853553130707
+      ],
+      [
+        132.5541502126005,
+        86.4950293269314
+      ],
+      [
+        131.49716143353731,
+        90.79553699081737
+      ],
+      [
+        130.00769355538355,
+        94.96717201534263
+      ],
+      [
+        128.10949239812257,
+        98.96930897985725
+      ],
+      [
+        125.79948876823502,
+        102.74639627276775
+      ],
+      [
+        123.18228034090338,
+        106.31644155810915
+      ],
+      [
+        120.19838232883686,
+        109.58680016301055
+      ],
+      [
+        116.92658029610304,
+        112.56893935317433
+      ],
+      [
+        113.37611419557025,
+        115.21504868080959
+      ],
+      [
+        109.56481183145102,
+        117.46782795121538
+      ],
+      [
+        105.55929977295482,
+        119.34914429339877
+      ],
+      [
+        101.39244587000809,
+        120.83720792420033
+      ],
+      [
+        97.10992168136275,
+        121.95920948867473
+      ],
+      [
+        92.72125631178127,
+        122.53346875000486
+      ],
+      [
+        88.30488549246671,
+        122.47725157212858
+      ],
+      [
+        83.88843428014826,
+        122.53428499387132
+      ],
+      [
+        79.49954979199742,
+        121.96071523503521
+      ],
+      [
+        75.20995435242097,
+        120.86150607184022
+      ],
+      [
+        71.03961509150153,
+        119.37535328668929
+      ],
+      [
+        67.03341645112617,
+        117.48942282844033
+      ],
+      [
+        63.2426408668211,
+        115.20160305871383
+      ],
+      [
+        59.67600915493149,
+        112.57769007754926
+      ],
+      [
+        56.39868530175826,
+        109.59950351734885
+      ],
+      [
+        53.42087770413298,
+        106.3218686576277
+      ],
+      [
+        50.79606673077753,
+        102.75589475678771
+      ],
+      [
+        48.50922009878114,
+        98.9645296421369
+      ],
+      [
+        46.62488841852052,
+        94.95772339433984
+      ],
+      [
+        45.13866403068615,
+        90.78763345093162
+      ],
+      [
+        44.03959522477332,
+        86.49821700653506
+      ],
+      [
+        43.465961958853484,
+        82.10955183049056
+      ],
+      [
+        43.52093724697853,
+        77.6933033266404
+      ],
+      [
+        43.46534336719893,
+        73.2769938968301
+      ],
+      [
+        44.04014445397587,
+        68.88849889522669
+      ],
+      [
+        45.16231896817554,
+        64.60614884918755
+      ],
+      [
+        46.650962904415806,
+        60.439683664630714
+      ],
+      [
+        48.53255471065718,
+        56.43454962104476
+      ],
+      [
+        50.78491071033266,
+        52.62325768194765
+      ],
+      [
+        53.43005226127035,
+        49.07226736011101
+      ],
+      [
+        56.41130155765424,
+        45.799719391827935
+      ],
+      [
+        59.68313583334215,
+        42.8176004585007
+      ],
+      [
+        63.254633210264515,
+        40.20295140487227
+      ],
+      [
+        67.02985118384544,
+        37.89051367890538
+      ],
+      [
+        71.03158093124695,
+        35.9918571879427
+      ],
+      [
+        75.20317367943643,
+        34.50274769825127
+      ],
+      [
+        79.50411590719376,
+        33.448846829497796
+      ],
+      [
+        83.88017083141652,
+        32.76842145644684
+      ],
+      [
+        88.30488549246671,
+        32.40935508115222
+      ],
+      [
+        92.72981220053984,
+        32.76626850689255
+      ],
+      [
+        97.10652678582082,
+        33.4444644570357
+      ],
+      [
+        101.40013624922355,
+        34.524046946347816
+      ],
+      [
+        105.56865477394157,
+        36.01487738962378
+      ],
+      [
+        109.57415511159218,
+        37.901298654386835
+      ],
+      [
+        113.3667482453784,
+        40.18557510750115
+      ],
+      [
+        116.92241126993419,
+        42.8227472731915
+      ],
+      [
+        120.19234132908635,
+        45.80584749002076
+      ],
+      [
+        123.17556639200124,
+        49.075675090638306
+      ],
+      [
+        125.81148924375418,
+        52.63219191912628
+      ],
+      [
+        128.09512846752588,
+        56.4249753542835
+      ],
+      [
+        129.98378099318984,
+        60.42933954550988
+      ],
+      [
+        131.47393383919214,
+        64.5981156761762
+      ],
+      [
+        132.5519424533437,
+        68.89201647696976
+      ],
+      [
+        133.23218630559768,
+        73.26835042050568
+      ]
+    ],
+    "rejected_points": [],
+    "edge_gradients": [
+      9513.0234375,
+      9413.7265625,
+      9368.26953125,
+      9398.84375,
+      9407.8828125,
+      9384.984375,
+      9388.62109375,
+      9399.53515625,
+      9393.24609375,
+      9383.7734375,
+      9394.58984375,
+      9382.74609375,
+      9373.08203125,
+      9385.58203125,
+      9434.1640625,
+      9388.5234375,
+      9399.40234375,
+      9399.84765625,
+      9412.6796875,
+      9376.9609375,
+      9392.41796875,
+      9387.6875,
+      9395.92578125,
+      9384.82421875,
+      9399.05078125,
+      9383.56640625,
+      9394.390625,
+      9382.9453125,
+      9385.2109375,
+      9370.91796875,
+      9409.09375,
+      9401.22265625,
+      9401.09765625,
+      9388.37890625,
+      9433.6328125,
+      9386.5625,
+      9372.37890625,
+      9380.859375,
+      9392.68359375,
+      9382.15625,
+      9391.26171875,
+      9396.25,
+      9388.828125,
+      9387.2890625,
+      9406.08203125,
+      9396.4765625,
+      9366.40234375,
+      9414.2109375,
+      9513.84375,
+      9402.140625,
+      9390.921875,
+      9411.43359375,
+      9394.46875,
+      9385.07421875,
+      9390.4140625,
+      9400.25,
+      9386.95703125,
+      9396.984375,
+      9385.7890625,
+      9380.74609375,
+      9395.859375,
+      9411.6484375,
+      9389.24609375,
+      9401.0078125
+    ],
+    "rejected_gradients": [],
+    "shape_params": {
+      "measurement_stage": "production_measurement",
+      "shape_type": "Circle",
+      "radius_px": 45.108033941736096,
+      "average_diameter_px": 90.21606788347219,
+      "maximum_diameter_px": 90.2503869501638,
+      "minimum_diameter_px": 89.5863519070292,
+      "diameter_pv_px": 0.6640350431346036,
+      "average_diameter_um": 9.02160678834722,
+      "maximum_diameter_um": 9.02503866509985,
+      "minimum_diameter_um": 8.958635190702921,
+      "diameter_pv_um": 0.06640347439692817,
+      "ellipse_roundness_um": 0.0003037452697753906,
+      "contour_ellipse_major_um": 9.021958351135254,
+      "contour_ellipse_minor_um": 9.021350860595703,
+      "roundness_angle_deg": -45.77692413330078,
+      "roundness_um": 0.0481547167998615,
+      "angular_coverage": 0.9843700844862544,
+      "maximum_gap_deg": 5.62676958494841,
+      "diameter_definition": "robust_average_circle",
+      "diameter_mode": "Average",
+      "reported_diameter_um": 9.02160678834722,
+      "width_px": 90.21606788347219,
+      "height_px": 90.21606788347219,
+      "roi_type": "Auto Caliper Circle",
+      "roi_inner_radius_px": 37.15894824548818,
+      "roi_outer_radius_px": 53.15894824548818,
+      "caliper_count": 64,
+      "caliper_width_px": 8.0,
+      "search_direction": "Inner to Outer",
+      "caliper_windows": [
+        {
+          "angle": 0.0,
+          "center_x": 133.4638337379549,
+          "center_y": 77.6933033266404,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9513.0234375,
+          "candidate_count": 13,
+          "accepted": true,
+          "selected_radius": 45.28394997169757
+        },
+        {
+          "angle": 0.09817477042468103,
+          "center_x": 133.24638105895676,
+          "center_y": 82.11965429395379,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9413.7265625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.14753429642843
+        },
+        {
+          "angle": 0.19634954084936207,
+          "center_x": 132.5961172101328,
+          "center_y": 86.50337708176237,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9368.26953125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11615906586767
+        },
+        {
+          "angle": 0.2945243112740431,
+          "center_x": 131.5193045878176,
+          "center_y": 90.8022540432329,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9398.84375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.135808710604465
+        },
+        {
+          "angle": 0.39269908169872414,
+          "center_x": 130.02631348620972,
+          "center_y": 94.97488464322127,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9407.8828125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.13879417759196
+        },
+        {
+          "angle": 0.4908738521234052,
+          "center_x": 128.13152222576957,
+          "center_y": 98.98108416805765,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9384.984375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.13396888674317
+        },
+        {
+          "angle": 0.5890486225480862,
+          "center_x": 125.85317868213347,
+          "center_y": 102.78227072630642,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9388.62109375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.09437593508254
+        },
+        {
+          "angle": 0.6872233929727672,
+          "center_x": 123.21322454909591,
+          "center_y": 106.34183681347174,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9399.53515625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11891746963266
+        },
+        {
+          "angle": 0.7853981633974483,
+          "center_x": 120.23708402810375,
+          "center_y": 109.62550186227745,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9393.24609375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.10421577749805
+        },
+        {
+          "angle": 0.8835729338221293,
+          "center_x": 116.95341897929805,
+          "center_y": 112.60164238326959,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9383.7734375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.116642180993196
+        },
+        {
+          "angle": 0.9817477042468103,
+          "center_x": 113.39385289213274,
+          "center_y": 115.24159651630717,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9394.58984375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.12701943521685
+        },
+        {
+          "angle": 1.0799224746714913,
+          "center_x": 109.59266633388395,
+          "center_y": 117.51994005994327,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9382.74609375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.099858947118236
+        },
+        {
+          "angle": 1.1780972450961724,
+          "center_x": 105.58646680904758,
+          "center_y": 119.41473132038342,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9373.08203125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.087957359039635
+        },
+        {
+          "angle": 1.2762720155208536,
+          "center_x": 101.41383620905921,
+          "center_y": 120.90772242199131,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9385.58203125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.08526079063027
+        },
+        {
+          "angle": 1.3744467859455345,
+          "center_x": 97.11495924758867,
+          "center_y": 121.98453504430651,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9434.1640625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.13312653288932
+        },
+        {
+          "angle": 1.4726215563702154,
+          "center_x": 92.73123645978009,
+          "center_y": 122.63479889313044,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9388.5234375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.05712780913119
+        },
+        {
+          "angle": 1.5707963267948966,
+          "center_x": 88.30488549246671,
+          "center_y": 122.85225157212858,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9399.40234375,
+          "candidate_count": 13,
+          "accepted": true,
+          "selected_radius": 44.78394824548818
+        },
+        {
+          "angle": 1.6689710972195777,
+          "center_x": 83.87853452515333,
+          "center_y": 122.63479889313045,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9399.84765625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.05794800245267
+        },
+        {
+          "angle": 1.7671458676442586,
+          "center_x": 79.49481173734475,
+          "center_y": 121.98453504430651,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9412.6796875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.13466177856497
+        },
+        {
+          "angle": 1.8653206380689396,
+          "center_x": 75.1959347758742,
+          "center_y": 120.90772242199131,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9376.9609375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11065228760517
+        },
+        {
+          "angle": 1.9634954084936207,
+          "center_x": 71.02330417588584,
+          "center_y": 119.41473132038342,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9392.41796875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.116325768954816
+        },
+        {
+          "angle": 2.061670178918302,
+          "center_x": 67.01710465104946,
+          "center_y": 117.51994005994328,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9387.6875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.12434512076878
+        },
+        {
+          "angle": 2.1598449493429825,
+          "center_x": 63.21591809280069,
+          "center_y": 115.24159651630717,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9395.92578125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.110848523018966
+        },
+        {
+          "angle": 2.2580197197676637,
+          "center_x": 59.65635200563537,
+          "center_y": 112.6016423832696,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9384.82421875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.127962499284955
+        },
+        {
+          "angle": 2.356194490192345,
+          "center_x": 56.372686956829675,
+          "center_y": 109.62550186227745,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9399.05078125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.12218103349091
+        },
+        {
+          "angle": 2.454369260617026,
+          "center_x": 53.396546435837514,
+          "center_y": 106.34183681347174,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9383.56640625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.12747225678762
+        },
+        {
+          "angle": 2.552544031041707,
+          "center_x": 50.75659230279994,
+          "center_y": 102.78227072630642,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9394.390625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.111472754630164
+        },
+        {
+          "angle": 2.650718801466388,
+          "center_x": 48.47824875916385,
+          "center_y": 98.98108416805765,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9382.9453125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.123830212995585
+        },
+        {
+          "angle": 2.748893571891069,
+          "center_x": 46.583457498723696,
+          "center_y": 94.97488464322127,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9385.2109375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11410374104916
+        },
+        {
+          "angle": 2.84706834231575,
+          "center_x": 45.090466397115804,
+          "center_y": 90.8022540432329,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9370.91796875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.10858185192043
+        },
+        {
+          "angle": 2.945243112740431,
+          "center_x": 44.01365377480061,
+          "center_y": 86.50337708176238,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9409.09375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.132498572464904
+        },
+        {
+          "angle": 3.043417883165112,
+          "center_x": 43.36338992597667,
+          "center_y": 82.1196542939538,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9401.22265625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.05587991040651
+        },
+        {
+          "angle": 3.141592653589793,
+          "center_x": 43.14593724697853,
+          "center_y": 77.6933033266404,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9401.09765625,
+          "candidate_count": 10,
+          "accepted": true,
+          "selected_radius": 44.78394824548818
+        },
+        {
+          "angle": 3.2397674240144743,
+          "center_x": 43.36338992597666,
+          "center_y": 73.26695235932702,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9388.37890625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.05650149516154
+        },
+        {
+          "angle": 3.3379421944391554,
+          "center_x": 44.01365377480061,
+          "center_y": 68.88322957151844,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9433.6328125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.13193858322616
+        },
+        {
+          "angle": 3.436116964863836,
+          "center_x": 45.0904663971158,
+          "center_y": 64.58435261004792,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9386.5625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.083862507771045
+        },
+        {
+          "angle": 3.5342917352885173,
+          "center_x": 46.58345749872369,
+          "center_y": 60.41172201005954,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9372.37890625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.085880920889466
+        },
+        {
+          "angle": 3.6324665057131984,
+          "center_x": 48.47824875916384,
+          "center_y": 56.40552248522316,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9380.859375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.09737137497983
+        },
+        {
+          "angle": 3.730641276137879,
+          "center_x": 50.75659230279994,
+          "center_y": 52.604335926974386,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9392.68359375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.124889986336285
+        },
+        {
+          "angle": 3.8288160465625602,
+          "center_x": 53.39654643583751,
+          "center_y": 49.04476983980907,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9382.15625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.115603649969344
+        },
+        {
+          "angle": 3.9269908169872414,
+          "center_x": 56.37268695682967,
+          "center_y": 45.76110479100337,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9391.26171875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.10433895329645
+        },
+        {
+          "angle": 4.025165587411922,
+          "center_x": 59.65635200563534,
+          "center_y": 42.78496427001122,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9396.25,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11672865020651
+        },
+        {
+          "angle": 4.123340357836604,
+          "center_x": 63.215918092800685,
+          "center_y": 40.14501013697364,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9388.828125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.089262875101426
+        },
+        {
+          "angle": 4.221515128261284,
+          "center_x": 67.01710465104946,
+          "center_y": 37.86666659333754,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9387.2890625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.1319083196673
+        },
+        {
+          "angle": 4.319689898685965,
+          "center_x": 71.02330417588581,
+          "center_y": 35.9718753328974,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9406.08203125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.13732004143978
+        },
+        {
+          "angle": 4.417864669110647,
+          "center_x": 75.1959347758742,
+          "center_y": 34.4788842312895,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9396.4765625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.13401098861781
+        },
+        {
+          "angle": 4.516039439535327,
+          "center_x": 79.49481173734473,
+          "center_y": 33.40207160897431,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9366.40234375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11125664421919
+        },
+        {
+          "angle": 4.614214209960009,
+          "center_x": 83.87853452515334,
+          "center_y": 32.751807760150356,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9414.2109375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.142254162619736
+        },
+        {
+          "angle": 4.71238898038469,
+          "center_x": 88.3048854924667,
+          "center_y": 32.53435508115222,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9513.84375,
+          "candidate_count": 12,
+          "accepted": true,
+          "selected_radius": 45.28394824548818
+        },
+        {
+          "angle": 4.81056375080937,
+          "center_x": 92.73123645978006,
+          "center_y": 32.751807760150356,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9402.140625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.14441752937626
+        },
+        {
+          "angle": 4.908738521234052,
+          "center_x": 97.11495924758867,
+          "center_y": 33.4020716089743,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9390.921875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11572487243352
+        },
+        {
+          "angle": 5.006913291658733,
+          "center_x": 101.4138362090592,
+          "center_y": 34.47888423128949,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9411.43359375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11175333335841
+        },
+        {
+          "angle": 5.105088062083414,
+          "center_x": 105.58646680904758,
+          "center_y": 35.97187533289739,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9394.46875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.112403154691016
+        },
+        {
+          "angle": 5.203262832508095,
+          "center_x": 109.59266633388395,
+          "center_y": 37.866666593337534,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9385.07421875,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.119679364637584
+        },
+        {
+          "angle": 5.301437602932776,
+          "center_x": 113.39385289213271,
+          "center_y": 40.14501013697363,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9390.4140625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.110161170257385
+        },
+        {
+          "angle": 5.399612373357457,
+          "center_x": 116.95341897929806,
+          "center_y": 42.78496427001121,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9400.25,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11007050649264
+        },
+        {
+          "angle": 5.497787143782138,
+          "center_x": 120.23708402810374,
+          "center_y": 45.76110479100336,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9386.95703125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.09567251372061
+        },
+        {
+          "angle": 5.595961914206819,
+          "center_x": 123.21322454909588,
+          "center_y": 49.044769839809035,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9396.984375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11023201282817
+        },
+        {
+          "angle": 5.6941366846315,
+          "center_x": 125.85317868213347,
+          "center_y": 52.60433592697438,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9385.7890625,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.10880878427102
+        },
+        {
+          "angle": 5.792311455056181,
+          "center_x": 128.13152222576957,
+          "center_y": 56.40552248522315,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9380.74609375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11768179720658
+        },
+        {
+          "angle": 5.890486225480862,
+          "center_x": 130.02631348620972,
+          "center_y": 60.411722010059506,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9395.859375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11291140678446
+        },
+        {
+          "angle": 5.988660995905543,
+          "center_x": 131.5193045878176,
+          "center_y": 64.58435261004789,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9411.6484375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.11153593885699
+        },
+        {
+          "angle": 6.086835766330224,
+          "center_x": 132.5961172101328,
+          "center_y": 68.88322957151843,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9389.24609375,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.113908054050015
+        },
+        {
+          "angle": 6.1850105367549055,
+          "center_x": 133.24638105895676,
+          "center_y": 73.26695235932704,
+          "length": 16.0,
+          "width": 8.0,
+          "gradient": 9401.0078125,
+          "candidate_count": 1,
+          "accepted": true,
+          "selected_radius": 45.144684809787606
+        }
+      ],
+      "candidate_contour_points": [
+        [
+          133.47500399859248,
+          78.0
+        ],
+        [
+          133.07336762442475,
+          83.802368924843
+        ],
+        [
+          131.9221711016979,
+          89.50096108409042
+        ],
+        [
+          130.03242468763074,
+          94.99618680266927
+        ],
+        [
+          127.43655730904098,
+          100.19135670909728
+        ],
+        [
+          124.24665014139177,
+          105.04570588934234
+        ],
+        [
+          120.45001159880185,
+          109.45001159880185
+        ],
+        [
+          116.08906952417401,
+          113.30316273056302
+        ],
+        [
+          111.27772284083986,
+          116.58614783727228
+        ],
+        [
+          106.07315458943091,
+          119.21824136229655
+        ],
+        [
+          100.56004544548743,
+          121.14267694036431
+        ],
+        [
+          94.84977977235579,
+          122.43348876440784
+        ],
+        [
+          89.0,
+          122.475
+        ],
+        [
+          83.13870030858422,
+          122.52099123698603
+        ],
+        [
+          77.34076874202295,
+          121.5128434319656
+        ],
+        [
+          71.7263164695163,
+          119.70236105143452
+        ],
+        [
+          66.34968666288209,
+          117.23149350724321
+        ],
+        [
+          61.39299393649496,
+          113.97815077014079
+        ],
+        [
+          56.8493294421711,
+          110.15067055782892
+        ],
+        [
+          52.88334304453021,
+          105.71328559751001
+        ],
+        [
+          49.43140914994928,
+          100.84493657873094
+        ],
+        [
+          46.80033463074781,
+          95.47967372355049
+        ],
+        [
+          44.807295148384156,
+          89.84139957633744
+        ],
+        [
+          43.531749252377935,
+          83.98600877185444
+        ],
+        [
+          43.525,
+          78.0
+        ],
+        [
+          43.49200616220469,
+          72.00875895106243
+        ],
+        [
+          44.67721933396771,
+          66.12374671423487
+        ],
+        [
+          46.57139249201634,
+          60.425495337588245
+        ],
+        [
+          49.251111636000346,
+          55.05096860305644
+        ],
+        [
+          52.57586313829793,
+          50.05077677217673
+        ],
+        [
+          56.56210559507093,
+          45.56210559507097
+        ],
+        [
+          61.10111628669185,
+          41.64146687087057
+        ],
+        [
+          66.09615857418736,
+          38.32938296199173
+        ],
+        [
+          71.51744289168184,
+          35.7933735241361
+        ],
+        [
+          77.1876379198399,
+          33.915664559442504
+        ],
+        [
+          83.0334801807471,
+          32.679782544253726
+        ],
+        [
+          89.0,
+          32.525
+        ],
+        [
+          94.92076750277242,
+          33.0273058903268
+        ],
+        [
+          100.73204277898225,
+          34.21542027226656
+        ],
+        [
+          106.27578509809649,
+          36.29256531553237
+        ],
+        [
+          111.5449033702569,
+          38.95108191098424
+        ],
+        [
+          116.36968998132394,
+          42.331125569540816
+        ],
+        [
+          120.73405490939477,
+          46.265945090605214
+        ],
+        [
+          124.53465676146612,
+          50.73329885835798
+        ],
+        [
+          127.70524560893679,
+          55.65351602862974
+        ],
+        [
+          130.2245586484103,
+          60.9242287049834
+        ],
+        [
+          132.03733696522963,
+          66.46818031578057
+        ],
+        [
+          133.25335229428345,
+          72.17393564384267
+        ]
+      ],
+      "candidate_mode": "CaliperCircle",
+      "coverage": 0.9843700844862544,
+      "rejected_count": 0,
+      "rejected_ratio": 0.0,
+      "max_deviation_um": 0.031485798822149746,
+      "recipe_validation_status": "Draft",
+      "quality_profile": "Standard",
+      "quality_profile_label": "标准",
+      "quality_grade": "优秀（满足超精确）",
+      "quality_details": "置信度=0.952；残差=0.007 μm；覆盖率=98.4%；异常点=0.0%；最大偏差=0.031 μm",
+      "quality_status": "Valid",
+      "quality_gate_reasons": [],
+      "quality_gate_warning": "",
+      "quality_evaluation_version": 1,
+      "failure_reason": "",
+      "algorithm_path": "自动识别 → Otsu阈值/闭合轮廓候选 → 三点/候选圆初始化 → 径向卡尺精测 → 一致边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算；椭圆圆度：有效轮廓点 → 物理坐标椭圆拟合 → (长轴 - 短轴) / 2；长轴角度[-90°, 90°)"
+    },
+    "ellipse_major_um": null,
+    "ellipse_minor_um": null,
+    "ellipse_diameter_um": null,
+    "ellipse_roundness_um": 0.0003037452697753906
+  },
+  "overlay": {
+    "mark_id": "baseline",
+    "delta_x_px": 0.0,
+    "delta_y_px": -0.0,
+    "delta_x_um": 0.0,
+    "delta_y_um": -0.0,
+    "overlay_r_um": 0.0,
+    "result": "Trial",
+    "warning": "试测/未验证配方，不作正式判定",
+    "quality_profile": "标准",
+    "quality_grade": "优秀（满足超精确）",
+    "quality_summary": "上层：优秀（满足超精确）（置信度=0.937；残差=0.009 μm；覆盖率=97.9%；异常点=0.0%；最大偏差=0.038 μm）；下层：优秀（满足超精确）（置信度=0.937；残差=0.009 μm；覆盖率=97.9%；异常点=0.0%；最大偏差=0.038 μm）",
+    "reference_contour_id": "",
+    "target_contour_id": "",
+    "reference_contour_name": "",
+    "target_contour_name": ""
+  },
+  "export_rows": [
+    {
+      "timestamp": "2026-10-21 00:43:47",
+      "run_index": null,
+      "measurement_mode": "单图模式",
+      "upper_file": "",
+      "lower_file": "",
+      "pixel_size_x_um": 0.1,
+      "pixel_size_y_um": 0.1,
+      "registration_offset_x_um": 0.0,
+      "registration_offset_y_um": 0.0,
+      "mark_id": "baseline",
+      "roi_id": "upper",
+      "roi_label": "",
+      "layer": "上层",
+      "center_x_um": 8.830488549246672,
+      "center_y_um": 7.76933033266404,
+      "diameter_um": 9.031789649097638,
+      "average_diameter_um": 9.031789649097638,
+      "maximum_diameter_um": 9.052818741305042,
+      "minimum_diameter_um": 8.956187152059476,
+      "diameter_pv_um": 0.09663158924556647,
+      "roundness_um": 0.05401936076561853,
+      "diameter_mode": "平均直径",
+      "fit_residual_um": 0.008625027331529164,
+      "edge_point_count": 48,
+      "confidence": 0.9372069543695644,
+      "fitting_mode": "卡尺找圆",
+      "algorithm_path": "手动ROI → 三点/卡尺圆初始化 → 径向灰度峰值找边 → 同一圆周边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算；椭圆圆度：RANSAC有效轮廓点 → 物理坐标椭圆拟合 → (长轴 - 短轴) / 2；长轴角度[-90°, 90°)",
+      "measurement_stage": "候选检测",
+      "quality_status": "有效",
+      "quality_profile": "标准",
+      "quality_grade": "优秀（满足超精确）",
+      "quality_details": "置信度=0.937；残差=0.009 μm；覆盖率=97.9%；异常点=0.0%；最大偏差=0.038 μm",
+      "coverage": 0.9788166331782444,
+      "angular_coverage": 0.9788166331782444,
+      "maximum_gap_deg": 7.626012055832033,
+      "rejected_count": 0,
+      "rejected_ratio": 0.0,
+      "max_deviation_um": 0.03780124851908084,
+      "failure_reason": "",
+      "recipe_validation_status": "",
+      "detection_warning": "",
+      "shape_width_um": null,
+      "shape_height_um": null,
+      "shape_major_um": null,
+      "shape_minor_um": null,
+      "ellipse_diameter_um": null,
+      "ellipse_roundness_um": 0.0008749961853027344,
+      "roundness_angle_deg": -60.70990562438965,
+      "shape_angle_deg": null,
+      "shape_aspect_ratio": null,
+      "roi_type": "卡尺圆",
+      "roi_inner_ratio": 0.65,
+      "roi_inner_radius_um": 3.5100000000000002,
+      "roi_outer_radius_um": 5.4,
+      "caliper_count": 48,
+      "caliper_width_um": 0.4,
+      "search_direction": "由内向外",
+      "roi_target_edge": "最强边缘",
+      "roi_angle_deg": 0.0,
+      "delta_x_um": 0.0,
+      "delta_y_um": -0.0,
+      "overlay_r_um": 0.0,
+      "result": "试测/不判定",
+      "overlay_warning": "试测/未验证配方，不作正式判定"
+    },
+    {
+      "timestamp": "2026-10-21 00:43:47",
+      "run_index": null,
+      "measurement_mode": "单图模式",
+      "upper_file": "",
+      "lower_file": "",
+      "pixel_size_x_um": 0.1,
+      "pixel_size_y_um": 0.1,
+      "registration_offset_x_um": 0.0,
+      "registration_offset_y_um": 0.0,
+      "mark_id": "baseline",
+      "roi_id": "lower",
+      "roi_label": "",
+      "layer": "下层",
+      "center_x_um": 8.830488549246672,
+      "center_y_um": 7.76933033266404,
+      "diameter_um": 9.031789649097638,
+      "average_diameter_um": 9.031789649097638,
+      "maximum_diameter_um": 9.052818741305042,
+      "minimum_diameter_um": 8.956187152059476,
+      "diameter_pv_um": 0.09663158924556647,
+      "roundness_um": 0.05401936076561853,
+      "diameter_mode": "平均直径",
+      "fit_residual_um": 0.008625027331529164,
+      "edge_point_count": 48,
+      "confidence": 0.9372069543695644,
+      "fitting_mode": "卡尺找圆",
+      "algorithm_path": "手动ROI → 三点/卡尺圆初始化 → 径向灰度峰值找边 → 同一圆周边缘筛选 → RANSAC圆拟合+稳健平均圆 → 中心差计算；椭圆圆度：RANSAC有效轮廓点 → 物理坐标椭圆拟合 → (长轴 - 短轴) / 2；长轴角度[-90°, 90°)",
+      "measurement_stage": "候选检测",
+      "quality_status": "有效",
+      "quality_profile": "标准",
+      "quality_grade": "优秀（满足超精确）",
+      "quality_details": "置信度=0.937；残差=0.009 μm；覆盖率=97.9%；异常点=0.0%；最大偏差=0.038 μm",
+      "coverage": 0.9788166331782444,
+      "angular_coverage": 0.9788166331782444,
+      "maximum_gap_deg": 7.626012055832033,
+      "rejected_count": 0,
+      "rejected_ratio": 0.0,
+      "max_deviation_um": 0.03780124851908084,
+      "failure_reason": "",
+      "recipe_validation_status": "",
+      "detection_warning": "",
+      "shape_width_um": null,
+      "shape_height_um": null,
+      "shape_major_um": null,
+      "shape_minor_um": null,
+      "ellipse_diameter_um": null,
+      "ellipse_roundness_um": 0.0008749961853027344,
+      "roundness_angle_deg": -60.70990562438965,
+      "shape_angle_deg": null,
+      "shape_aspect_ratio": null,
+      "roi_type": "卡尺圆",
+      "roi_inner_ratio": 0.65,
+      "roi_inner_radius_um": 3.5100000000000002,
+      "roi_outer_radius_um": 5.4,
+      "caliper_count": 48,
+      "caliper_width_um": 0.4,
+      "search_direction": "由内向外",
+      "roi_target_edge": "最强边缘",
+      "roi_angle_deg": 0.0,
+      "delta_x_um": 0.0,
+      "delta_y_um": -0.0,
+      "overlay_r_um": 0.0,
+      "result": "试测/不判定",
+      "overlay_warning": "试测/未验证配方，不作正式判定"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "2.4.8"
+  #define AppVersion "2.5.0"
 #endif
 
 #define AppName "SOMA Vision Metrology"

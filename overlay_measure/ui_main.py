@@ -432,6 +432,11 @@ class MainWindow(
         self._update_toolbar_density()
 
     def closeEvent(self, event):
+        diagnostics = getattr(self, "_soma_diagnostics_dialog", None)
+        if diagnostics is not None and diagnostics.worker is not None and diagnostics.worker.isRunning():
+            event.ignore()
+            QMessageBox.information(self, "成像诊断", "诊断算法仍在运行，请完成后关闭。")
+            return
         for thread, worker in (
             (self._preview_thread, self._preview_worker),
             (self._calculation_thread, self._calculation_worker),

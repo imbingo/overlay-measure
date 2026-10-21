@@ -175,6 +175,19 @@ class MainWindowWorkflowMixin:
                 return self.lower_canvas
             return self.upper_canvas
 
+        def start_soma_diagnostics(self):
+            if self.operation_mode != "Engineering" or self._calculation_running:
+                QMessageBox.information(self, "成像诊断", "请在工程模式且正式测量空闲时打开。")
+                return
+            from .diagnostics.ui_diagnostics import DiagnosticsDialog
+            dialog = getattr(self, "_soma_diagnostics_dialog", None)
+            if dialog is None:
+                dialog = DiagnosticsDialog(self.params, self.config, self)
+                self._soma_diagnostics_dialog = dialog
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+
         def start_image_diagnostics(self):
             if self.operation_mode != "Engineering":
                 QMessageBox.information(self, "图像诊断", "图像诊断仅在工程模式下可用。")

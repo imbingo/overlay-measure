@@ -176,6 +176,8 @@ class MainWindowStateMixin:
                 self.recipe_quick_menu.set_engineering_access(engineering and not self._calculation_running)
             if hasattr(self, "image_diagnostics_action"):
                 self.image_diagnostics_action.setEnabled(engineering and not self._calculation_running)
+            if hasattr(self, "soma_diagnostics_action"):
+                self.soma_diagnostics_action.setEnabled(engineering and not self._calculation_running)
             self.analyze_roi_btn.setEnabled(
                 not self._calculation_running and not self._is_auto_workflow()
             )

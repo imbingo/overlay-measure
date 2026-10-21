@@ -163,8 +163,25 @@ def _angular_statistics(points: np.ndarray, center_x: float, center_y: float, ex
     return min(coverage, count_coverage), float(np.rad2deg(maximum_gap))
 
 
-def detect_caliper_circle(gray: np.ndarray, roi: Roi, params: DetectionParams) -> CaliperCircleResult:
-    """Extract one radial edge per caliper and fit the resulting circular contour."""
+def detect_caliper_circle(
+    gray: np.ndarray, roi: Roi, params: DetectionParams, *,
+    diagnostics: list[dict] | None = None,
+    sampling_transform: np.ndarray | None = None,
+) -> CaliperCircleResult:
+    """Extract and fit using the production algorithm.
+
+    Optional sampling_transform maps the ROI/result coordinate frame to native
+    image pixels. It changes sampling coordinates only, never warps gray.
+    Without either keyword, the original production path is unchanged.
+    diagnostics receives one record per planned caliper, including failed ones.
+    """
+    if sampling_transform is not None:
+        sampling_transform = np.asarray(sampling_transform, dtype=np.float64)
+        if (sampling_transform.shape != (3, 3) or not np.isfinite(sampling_transform).all()
+                or not np.allclose(sampling_transform[2], [0, 0, 1])
+                or abs(np.linalg.det(sampling_transform[:2, :2])) < 1e-12):
+            raise ValueError("采样坐标变换必须为可逆二维仿射坐标映射")
+    trace_start = len(diagnostics) if diagnostics is not None else 0
     r = roi.normalized()
     cx, cy = r.center()
     inner = r.inner_radius()
@@ -205,17 +222,25 @@ def detect_caliper_circle(gray: np.ndarray, roi: Roi, params: DetectionParams) -
             search_vector = radial
 
         profile = []
+        sample_counts = [] if diagnostics is not None else None
         for sample_distance in radial_samples:
             sample_center = start + search_vector * float(sample_distance)
-            samples = [
-                _bilinear_sample(
-                    image,
-                    float((sample_center + tangent * float(offset))[0]),
-                    float((sample_center + tangent * float(offset))[1]),
-                )
-                for offset in tangent_offsets
-            ]
+            if sampling_transform is not None:
+                sample_xy = sample_center + tangent_offsets[:, None] * tangent
+                native_xy = sample_xy @ sampling_transform[:2, :2].T + sampling_transform[:2, 2]
+                samples = [_bilinear_sample(image, float(x), float(y)) for x, y in native_xy]
+            else:
+                samples = [
+                    _bilinear_sample(
+                        image,
+                        float((sample_center + tangent * float(offset))[0]),
+                        float((sample_center + tangent * float(offset))[1]),
+                    )
+                    for offset in tangent_offsets
+                ]
             samples = [value for value in samples if np.isfinite(value)]
+            if sample_counts is not None:
+                sample_counts.append(len(samples))
             if not samples:
                 profile = []
                 break
@@ -242,6 +267,24 @@ def detect_caliper_circle(gray: np.ndarray, roi: Roi, params: DetectionParams) -
                 }
             )
         candidate_groups.append(group)
+        if diagnostics is not None:
+            diagnostic_profile = np.asarray(profile, dtype=np.float32)
+            diagnostics.append({
+                "caliper_id": index, "angle_rad": float(angle),
+                "start": start.copy(), "search_vector": search_vector.copy(),
+                "tangent": tangent.copy(), "radial_samples": radial_samples.copy(),
+                "tangent_offsets": tangent_offsets.copy(),
+                "finite_tangent_counts": sample_counts,
+                "sampling_transform": None if sampling_transform is None else sampling_transform.copy(),
+                "profile": diagnostic_profile,
+                "gradient": np.gradient(diagnostic_profile, radial_step) if len(profile) >= 3 else np.empty(0),
+                "candidates": [dict(sub_index=s, gradient=g, above_threshold=g >= float(params.min_gradient))
+                               for s, g in profile_candidates],
+                "selected": None, "inlier": False,
+                "status": ("below_gradient_threshold" if profile_candidates else "no_peak") if profile else "outside_image",
+                "gaussian_sigma_px": sigma, "step_px": radial_step,
+                "interpolation": "bilinear; finite tangent samples averaged",
+            })
         strongest_gradient = max((candidate["gradient"] for candidate in group), default=0.0)
 
         windows.append(
@@ -289,6 +332,12 @@ def detect_caliper_circle(gray: np.ndarray, roi: Roi, params: DetectionParams) -
         mask = np.ones(len(points), dtype=bool)
 
     inlier_count = int(np.sum(mask))
+    if diagnostics is not None:
+        for candidate, inlier in zip(selected, mask):
+            record = diagnostics[trace_start + int(candidate["window_index"])]
+            record["selected"] = candidate.copy()
+            record["inlier"] = bool(inlier)
+            record["status"] = "valid" if inlier else "fit_rejected"
     inlier_points = points[mask]
     stats = circle_diameter_statistics(inlier_points, fit_cx, fit_cy)
     radius = stats["average_radius_px"] or radius
