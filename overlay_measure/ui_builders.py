@@ -293,6 +293,7 @@ class MainWindowBuilderMixin:
             self.import_images_btn.setMenu(self.import_images_menu)
 
             self.more_actions_btn = QToolButton()
+            self.more_actions_btn.setObjectName("commandMore")
             self.more_actions_btn.setText("更多")
             self.more_actions_btn.setPopupMode(QToolButton.InstantPopup)
             self.more_actions_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
@@ -322,6 +323,7 @@ class MainWindowBuilderMixin:
             command_layout.addWidget(self.image_viewer_btn)
             command_layout.addWidget(self.batch_preview_nav)
             command_layout.addStretch(1)
+            command_layout.addWidget(self.more_actions_btn)
             command_layout.addWidget(self.analyze_roi_btn)
             command_layout.addWidget(self.analyze_all_btn)
             command_layout.addWidget(self.export_btn)

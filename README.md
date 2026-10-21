@@ -1,5 +1,11 @@
 # SOMA Vision Metrology
 
+## V2.5.1 Diagnostics 入口修复
+
+- 修复 V2.5.0 的“更多”按钮未加入工具栏，导致成像诊断入口不可见的问题。
+- 切换至顶部“工程模式”后，“更多”位于图像工具栏右侧、“分析 ROI”左侧；展开后选择“SOMA Diagnostics / 成像诊断”。
+- 保持生产模式工具栏原样；增加多个窗口尺寸下的按钮可见性、菜单点击及诊断窗口打开测试。
+
 ## V2.5.0 SOMA Diagnostics / 成像诊断
 
 - 工程模式 → 更多 → **SOMA Diagnostics / 成像诊断**，打开独立 A/B 会话；原“图像诊断与边缘分析”入口保留。
@@ -132,7 +138,7 @@
 
 ## 当前版本
 
-- 当前代码版本：V2.5.0
+- 当前代码版本：V2.5.1
 - 来源文件：`overlay_mark_measure_v1_4_2.zip`
 - Windows 启动文件：`start_overlay_measure.bat`
 - Python 主入口：`main.py`

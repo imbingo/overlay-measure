@@ -160,6 +160,7 @@ class MainWindowStateMixin:
             if not hasattr(self, "side_tabs"):
                 return
             engineering = self.operation_mode == "Engineering"
+            self.more_actions_btn.setVisible(engineering)
             self.image_mode_label.setVisible(True)
             self.mode_combo.setVisible(True)
             self.display_enhance_check.setVisible(True)
