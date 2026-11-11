@@ -409,24 +409,6 @@ class MainWindow(
             color = label.property("resultColor") or "#1D1D1F"
             label.setStyleSheet(f"color: {color}; font-size: {point_size}px; font-weight: 700;")
 
-    def _update_toolbar_density(self):
-        if not hasattr(self, "import_upper_btn"):
-            return
-        compact = self.width() < 1280
-        labels = {
-            self.import_upper_btn: "导入上层" if compact else "导入上层/单图",
-            self.import_lower_btn: "导入下层" if compact else "导入下层图像",
-            self.analyze_all_btn: "运行" if compact else "运行测量程序",
-            self.export_btn: "导出" if compact else "导出结果",
-            self.soma_diagnostics_btn: "诊断" if compact else "成像诊断",
-        }
-        for button, text in labels.items():
-            button.setText(text)
-        self.reset_measurement_btn.setText("重置")
-        self.analyze_roi_btn.setText("分析 ROI")
-        self.display_enhance_check.setText("增强" if compact else "显示增强")
-        self.image_status_label.setVisible(False)
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_summary_typography()

@@ -52,6 +52,8 @@ class ResultTableWidget(QTableWidget):
         bar.setValue(self.horizontalScrollBar().value())
         bar.blockSignals(False)
         bar.setEnabled(maximum > minimum)
+        # A parentless bar would pop up as a top-level window when shown.
+        bar.setVisible(maximum > minimum and bar.parentWidget() is not None)
 
     def fit_result_columns(self):
         """Size columns from complete cell text so overflow remains scrollable."""

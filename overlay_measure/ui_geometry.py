@@ -155,7 +155,8 @@ class MainWindowGeometryMixin:
         layout.addWidget(feature_section)
 
         measurement_section = CollapsibleSection("测量工具", True)
-        measurement_group = QGroupBox("测量工具")
+        measurement_group = QGroupBox()
+        measurement_group.setProperty("untitled", True)
         measurement_layout = QVBoxLayout(measurement_group)
         coordinate_row = QHBoxLayout()
         self.create_coordinate_btn = QPushButton("建立坐标系")

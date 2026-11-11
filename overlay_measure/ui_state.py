@@ -213,7 +213,47 @@ class MainWindowStateMixin:
                 table = getattr(self, table_name, None)
                 if table is not None and hasattr(table, "set_delete_allowed"):
                     table.set_delete_allowed(engineering and not self._calculation_running)
+            self._update_toolbar_density()
             self._update_roi_edit_lock()
+
+        def _update_toolbar_density(self):
+            if not hasattr(self, "import_upper_btn"):
+                return
+            # Use the roomiest density whose minimum width still fits, so controls never overlap.
+            layout = self.command_bar.layout()
+            # The styled drop-down needs more room than the legacy 78 px minimum, or "100%" gets clipped.
+            self.zoom_level_combo.setMinimumWidth(max(78, self.zoom_level_combo.minimumSizeHint().width()))
+            for level in range(6):
+                self._apply_toolbar_density(level)
+                if layout.minimumSize().width() <= self.width():
+                    break
+            self.image_status_label.setVisible(False)
+
+        def _apply_toolbar_density(self, level: int):
+            compact = level >= 1
+            labels = {
+                self.import_upper_btn: "导入上层" if compact else "导入上层/单图",
+                self.import_lower_btn: "导入下层" if compact else "导入下层图像",
+                self.analyze_all_btn: "运行" if compact else "运行测量程序",
+                self.export_btn: "导出" if compact else "导出结果",
+                self.soma_diagnostics_btn: "诊断" if compact else "成像诊断",
+            }
+            for button, text in labels.items():
+                button.setText(text)
+            self.reset_measurement_btn.setText("重置")
+            self.analyze_roi_btn.setText("分析 ROI")
+            self.display_enhance_check.setText("增强" if compact else "显示增强")
+            layout = self.command_bar.layout()
+            margin = (18, 18, 10, 10, 10, 8)[level]
+            layout.setContentsMargins(margin, 9, margin, 9)
+            layout.setSpacing((9, 9, 5, 5, 5, 4)[level])
+            # The mode combo already reads "单图模式/双图模式", so its caption is the first thing to drop.
+            self.image_mode_label.setVisible(level < 3)
+            # These three stay reachable from the "更多" menu whenever that menu is shown.
+            in_menu = not self.more_actions_btn.isHidden()
+            self.display_enhance_check.setVisible(level < 4 or not in_menu)
+            self.reset_view_btn.setVisible(level < 5 or not in_menu)
+            self.reset_measurement_btn.setVisible(level < 5 or not in_menu)
 
         def _update_roi_edit_lock(self):
             allowed = self.operation_mode == "Engineering" and not self._calculation_running
