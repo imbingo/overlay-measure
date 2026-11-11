@@ -1,5 +1,10 @@
 # SOMA Vision Metrology
 
+## V2.6.1 界面打磨与用户手册
+
+- 统一控件样式与禁用态显示，修复进度条、空结果表和窄窗口下的显示问题。
+- 新增中文用户手册 `docs/user-guide/README.md`（含 PDF 导出版说明与截图），按功能分类讲解操作流程。
+
 ## V2.6.0 简化成像诊断
 
 - 直接使用主页面已导入的上下层图像、圆心、亚像素轮廓与参数，不再到诊断页重复导图和画 ROI。
@@ -145,7 +150,7 @@
 
 ## 当前版本
 
-- 当前代码版本：V2.6.0
+- 当前代码版本：V2.6.1
 - 来源文件：`overlay_mark_measure_v1_4_2.zip`
 - Windows 启动文件：`start_overlay_measure.bat`
 - Python 主入口：`main.py`
