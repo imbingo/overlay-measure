@@ -221,7 +221,9 @@ class MainWindowStateMixin:
                 return
             # Use the roomiest density whose minimum width still fits, so controls never overlap.
             layout = self.command_bar.layout()
-            for level in range(5):
+            # The styled drop-down needs more room than the legacy 78 px minimum, or "100%" gets clipped.
+            self.zoom_level_combo.setMinimumWidth(max(78, self.zoom_level_combo.minimumSizeHint().width()))
+            for level in range(6):
                 self._apply_toolbar_density(level)
                 if layout.minimumSize().width() <= self.width():
                     break
@@ -242,13 +244,16 @@ class MainWindowStateMixin:
             self.analyze_roi_btn.setText("分析 ROI")
             self.display_enhance_check.setText("增强" if compact else "显示增强")
             layout = self.command_bar.layout()
-            margin = 10 if level >= 2 else 18
+            margin = (18, 18, 10, 10, 10, 8)[level]
             layout.setContentsMargins(margin, 9, margin, 9)
-            layout.setSpacing(5 if level >= 2 else 9)
+            layout.setSpacing((9, 9, 5, 5, 5, 4)[level])
             # The mode combo already reads "单图模式/双图模式", so its caption is the first thing to drop.
             self.image_mode_label.setVisible(level < 3)
-            # "显示增强" stays reachable from the "更多" menu whenever that menu is shown.
-            self.display_enhance_check.setVisible(level < 4 or self.more_actions_btn.isHidden())
+            # These three stay reachable from the "更多" menu whenever that menu is shown.
+            in_menu = not self.more_actions_btn.isHidden()
+            self.display_enhance_check.setVisible(level < 4 or not in_menu)
+            self.reset_view_btn.setVisible(level < 5 or not in_menu)
+            self.reset_measurement_btn.setVisible(level < 5 or not in_menu)
 
         def _update_roi_edit_lock(self):
             allowed = self.operation_mode == "Engineering" and not self._calculation_running

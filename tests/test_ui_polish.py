@@ -6,7 +6,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionComboBox, QTableWidgetItem, QVBoxLayout, QWidget
 
 from overlay_measure.result_table import ResultTableWidget
 from overlay_measure.ui_components import CollapsibleSection, ui_asset_url
@@ -38,6 +38,7 @@ def test_command_bar_controls_never_overlap(mode, batch_preview, width):
     window.show()
     window._set_operation_mode(mode, authenticated=True)
     window.batch_preview_nav.setVisible(batch_preview)
+    window.batch_preview_index_label.setText("批量预览 上 12/12 · 下 12/12")
     window.resize(width, 720)
     app.processEvents()
     window._update_toolbar_density()
@@ -47,9 +48,18 @@ def test_command_bar_controls_never_overlap(mode, batch_preview, width):
     for left, right in zip(widgets, widgets[1:]):
         assert left.geometry().right() < right.geometry().left()
     assert widgets[-1].geometry().right() <= window.command_bar.width()
-    # Every density keeps the image-mode selector and a route to display enhancement.
+    # Nothing is squeezed below the width its text needs.
+    for widget in widgets:
+        assert widget.width() >= widget.minimumSizeHint().width()
+    combo = window.zoom_level_combo
+    option = QStyleOptionComboBox()
+    combo.initStyleOption(option)
+    edit_field = combo.style().subControlRect(QStyle.CC_ComboBox, option, QStyle.SC_ComboBoxEditField, combo)
+    assert edit_field.width() >= combo.fontMetrics().horizontalAdvance("100%")
+    # Every density keeps the image-mode selector; anything hidden is still in the "更多" menu.
     assert window.mode_combo.isVisible()
-    assert window.display_enhance_check.isVisible() or window.more_actions_btn.isVisible()
+    for control in (window.display_enhance_check, window.reset_view_btn, window.reset_measurement_btn):
+        assert control.isVisible() or window.more_actions_btn.isVisible()
     window.close()
     app.processEvents()
 
