@@ -226,6 +226,7 @@ class RecipeQuickMenu(QMenu):
             empty.setFlags(Qt.ItemIsEnabled)
             empty.setForeground(0, QColor("#8A939F"))
             self.tree.addTopLevelItem(empty)
+            self.tree.setFirstColumnSpanned(self.tree.indexOfTopLevelItem(empty), self.tree.rootIndex(), True)
 
     def _activate_item(self, item: QTreeWidgetItem, _column: int = 0) -> None:
         path = item.data(0, Qt.UserRole)

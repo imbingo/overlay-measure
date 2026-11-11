@@ -10,23 +10,23 @@ from typing import Dict, Optional
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import QDir, QObject, QPoint, QPointF, QRectF, QThread, QTimer, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
+from PySide6.QtCore import QDir, QObject, QPoint, QPointF, QRectF, QSize, QThread, QTimer, Qt, QUrl, Signal, Slot
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
-    QDialog,
-    QDialogButtonBox,
-    QFrame,
-    QGridLayout,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFileSystemModel,
     QFormLayout,
+    QFrame,
+    QGridLayout,
     QGroupBox,
-    QHeaderView,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -37,16 +37,16 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QStyle,
     QSpinBox,
     QSplitter,
+    QStyle,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QToolButton,
+    QTreeView,
     QTreeWidget,
     QTreeWidgetItem,
-    QTreeView,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
@@ -137,15 +137,28 @@ class FramelessTitleBar(QFrame):
         super().mouseDoubleClickEvent(event)
 
 
+def ui_asset_url(name: str) -> str:
+    runtime_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+    return (runtime_root / "assets" / "ui" / name).as_posix()
+
+
 class CollapsibleSection(QWidget):
     def __init__(self, title: str, expanded: bool = True, parent=None):
         super().__init__(parent)
-        self.toggle_btn = QToolButton()
-        self.toggle_btn.setText(title)
+        self.toggle_btn = QPushButton(title)
         self.toggle_btn.setCheckable(True)
         self.toggle_btn.setChecked(expanded)
-        self.toggle_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.toggle_btn.setObjectName("sectionToggle")
+        self.toggle_btn.setIconSize(QSize(10, 10))
+        # Styled here so the header looks the same inside dialogs that carry their own stylesheet.
+        self.toggle_btn.setStyleSheet(
+            "QPushButton { text-align: left; font-weight: 600; padding: 9px 10px; color: #20242B; "
+            "background: #FFFFFF; border: 1px solid #E0E4E9; border-radius: 7px; }"
+            "QPushButton:hover { background: #F7F9FB; border-color: #B9C2CE; }"
+            "QPushButton:disabled { color: #A3ABB6; }"
+        )
+        self._expanded_icon = QIcon(ui_asset_url("chevron-down.png"))
+        self._collapsed_icon = QIcon(ui_asset_url("chevron-right.png"))
         self.body = QWidget()
         self.body_layout = QVBoxLayout(self.body)
         self.body_layout.setContentsMargins(0, 8, 0, 0)
@@ -160,7 +173,7 @@ class CollapsibleSection(QWidget):
 
     def _apply_state(self, expanded: bool):
         self.body.setVisible(expanded)
-        self.toggle_btn.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+        self.toggle_btn.setIcon(self._expanded_icon if expanded else self._collapsed_icon)
 
     def add_widget(self, widget: QWidget):
         self.body_layout.addWidget(widget)
@@ -1199,7 +1212,12 @@ class ImageCanvas(QLabel):
             # Place label near the top-left of the outer bounding box.
             x, y = self.image_to_widget(r.x, r.y)
             typ_label = {"Annulus": "圆环", "Caliper Circle": "卡尺圆", "Rectangular Ring": "矩形环", "Circle": "圆", "Ellipse": "椭圆", "Rectangle": "矩形", "Approximate Line": "近似直线", "Region Center": "区域中心", "Robust Center": "稳健中心"}.get(typ, typ)
-            painter.drawText(int(x + 4), int(y + 16), f"{label} [{typ_label}]")
+            painter.save()
+            label_color = QColor(color).lighter(150)
+            label_color.setAlpha(255)
+            painter.setPen(label_color)
+            self._draw_overlay_label(painter, int(x + 4), int(y + 16), f"{label} [{typ_label}]")
+            painter.restore()
 
     def _draw_roi_handles(self, painter: QPainter, roi: Roi):
         handles = self._roi_handle_points(roi)
@@ -1654,7 +1672,16 @@ class ImageCanvas(QLabel):
 
         if self.pixmap_cache is None:
             painter.setPen(QColor("#F5F6F8"))
-            painter.drawText(self.rect(), Qt.AlignCenter, "等待导入图像")
+            if self.image_drop_enabled:
+                painter.drawText(self.rect().adjusted(0, 0, 0, -24), Qt.AlignCenter, "等待导入图像")
+                painter.setPen(QColor("#AEB6C2"))
+                painter.drawText(
+                    self.rect().adjusted(12, 24, -12, 0),
+                    Qt.AlignCenter | Qt.TextWordWrap,
+                    "可将图像文件拖到此处，或使用上方的导入按钮",
+                )
+            else:
+                painter.drawText(self.rect(), Qt.AlignCenter, "等待导入图像")
             painter.end()
             return
 
@@ -1854,17 +1881,35 @@ class ImageCanvas(QLabel):
         bar_px_widget = target_um / mean_um * self.scale
         x0 = 24
         y0 = self.height() - 36
+        ax0 = self.width() - 92
+        ay0 = self.height() - 44
+        # Dark underlay keeps the white scale bar and axes readable on bright images.
+        painter.setPen(QPen(QColor(18, 21, 26, 170), 5.0))
+        painter.drawLine(int(x0), int(y0), int(x0 + bar_px_widget), int(y0))
+        painter.setPen(QPen(QColor(18, 21, 26, 170), 4.0))
+        painter.drawLine(ax0, ay0, ax0 + 42, ay0)
+        painter.drawLine(ax0, ay0, ax0, ay0 - 42)
         painter.setPen(QPen(QColor("#FFFFFF"), 3.0))
         painter.drawLine(int(x0), int(y0), int(x0 + bar_px_widget), int(y0))
         painter.setPen(QColor("#FFFFFF"))
-        painter.drawText(int(x0), int(y0 - 8), f"{target_um:g} μm")
-        ax0 = self.width() - 92
-        ay0 = self.height() - 44
+        self._draw_overlay_label(painter, int(x0), int(y0 - 10), f"{target_um:g} μm")
         painter.setPen(QPen(QColor("#FFFFFF"), 2.0))
         painter.drawLine(ax0, ay0, ax0 + 42, ay0)
         painter.drawLine(ax0, ay0, ax0, ay0 - 42)
-        painter.drawText(ax0 + 48, ay0 + 5, "X")
-        painter.drawText(ax0 - 10, ay0 - 48, "Y")
+        self._draw_overlay_label(painter, ax0 + 48, ay0 + 5, "X")
+        self._draw_overlay_label(painter, ax0 - 4, ay0 - 48, "Y")
+
+    @staticmethod
+    def _draw_overlay_label(painter: QPainter, x: int, y: int, text: str):
+        """Draw overlay text on a translucent dark plate so it stays readable on bright images."""
+        metrics = painter.fontMetrics()
+        plate = QRectF(x - 4, y - metrics.ascent() - 1, metrics.horizontalAdvance(text) + 8, metrics.height() + 2)
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(18, 21, 26, 195))
+        painter.drawRoundedRect(plate, 3, 3)
+        painter.restore()
+        painter.drawText(x, y, text)
 
     def _draw_secondary_detection(self, painter: QPainter, detection: DetectionResult, label: str):
         """Draw a cheap summary for non-active manual ROIs.

@@ -84,6 +84,7 @@ from .ui_components import (
     SidebarComboBox,
     SidebarDoubleSpinBox,
     SidebarSpinBox,
+    ui_asset_url,
 )
 from .ui_recipe_views import RecipeLibraryDialog, RecipeQuickMenu
 from .ui_workers import MeasurementWorker
@@ -91,10 +92,19 @@ from .ui_workers import MeasurementWorker
 
 class MainWindowBuilderMixin:
         def _apply_window_style(self):
+            chevron_down = ui_asset_url("chevron-down.png")
+            chevron_up = ui_asset_url("chevron-up.png")
             self.setStyleSheet("""
                 QMainWindow, QWidget { background: #F5F7FA; color: #20242B; }
                 QMainWindow { border: 1px solid #C9CED6; }
-                QLabel { background: transparent; }
+                QLabel, QCheckBox, QRadioButton { background: transparent; }
+                QLabel:disabled, QCheckBox:disabled, QRadioButton:disabled { color: #A3ABB6; }
+                QCheckBox { spacing: 6px; }
+                QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #B9C2CE; border-radius: 3px; background: #FFFFFF; }
+                QCheckBox::indicator:hover { border-color: #087EF4; }
+                QCheckBox::indicator:checked { background: #087EF4; border-color: #087EF4; image: url("%(check)s"); }
+                QCheckBox::indicator:disabled { background: #F5F7FA; border-color: #E6EAEF; }
+                QCheckBox::indicator:checked:disabled { background: #B5D8FB; border-color: #B5D8FB; }
                 QFrame#titleBar { background: #FFFFFF; border: none; border-bottom: 1px solid #E3E7EC; }
                 QFrame#commandBar { background: #FFFFFF; border: none; border-bottom: 1px solid #E3E7EC; }
                 QLabel#brandDot { color: #2878D0; font-size: 15px; }
@@ -113,21 +123,28 @@ class MainWindowBuilderMixin:
                 QGroupBox, QTableWidget, QPlainTextEdit { background: #FFFFFF; border: 1px solid #D8DEE6; border-radius: 7px; margin-top: 8px; padding-top: 8px; }
                 QTableWidget#resultTable { margin-top: 0px; padding-top: 0px; border-radius: 5px; }
                 QPlainTextEdit { padding: 8px; color: #20242B; font-family: "Microsoft YaHei UI"; font-size: 12px; }
+                QGroupBox[untitled="true"] { margin-top: 0px; padding-top: 2px; }
                 QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #20242B; font-weight: 600; }
                 QPushButton { background: #FFFFFF; border: 1px solid #D6DCE4; border-radius: 6px; padding: 7px 12px; min-height: 20px; }
                 QPushButton:hover { background: #F7F9FB; border-color: #B9C2CE; }
                 QPushButton:pressed { background: #EEF2F6; }
+                QPushButton:disabled, QToolButton:disabled { color: #A3ABB6; background: #F5F7FA; border-color: #E6EAEF; }
                 QPushButton#primaryButton { background: #087EF4; color: #FFFFFF; border-color: #087EF4; font-weight: 600; padding-left: 18px; padding-right: 18px; }
                 QPushButton#primaryButton:hover { background: #006DDB; border-color: #006DDB; }
+                QPushButton#primaryButton:disabled { background: #B5D8FB; border-color: #B5D8FB; color: #FFFFFF; }
                 QPushButton#commandAction, QToolButton#commandAction { background: #FFFFFF; border: 1px solid #D6DCE4; border-radius: 6px; padding: 6px 10px; font-weight: 500; }
                 QPushButton#commandAction:hover, QToolButton#commandAction:hover { background: #F7F9FB; border-color: #B9C2CE; }
-                QToolButton#commandMore { background: #FFFFFF; border: 1px solid #D6DCE4; border-radius: 6px; padding: 6px 9px; }
+                QToolButton#commandMore { background: #FFFFFF; border: 1px solid #D6DCE4; border-radius: 6px; padding: 6px 22px 6px 10px; }
+                QToolButton#commandMore::menu-indicator, QToolButton#titleAction::menu-indicator { image: url("%(chevron_down)s"); subcontrol-origin: padding; subcontrol-position: center right; right: 7px; width: 10px; height: 10px; }
                 QToolButton#commandMore:hover { background: #F7F9FB; border-color: #B9C2CE; }
+                QPushButton#commandAction:disabled, QToolButton#commandAction:disabled, QToolButton#commandMore:disabled { background: #F5F7FA; border-color: #E6EAEF; }
                 QPushButton#statusCancelButton { background: #FFFFFF; border: 1px solid #D6DCE4; border-radius: 5px; padding: 2px 9px; min-height: 0; font-size: 11px; }
                 QPushButton#titleAction, QToolButton#titleAction { border: none; background: transparent; padding: 5px 10px; min-height: 22px; }
+                QToolButton#titleAction { padding-right: 22px; }
                 QPushButton#titleAction:hover, QToolButton#titleAction:hover { background: #F2F5F8; }
                 QPushButton#recipeSwitcher { background: #F7F9FB; border: 1px solid #DCE2E9; border-radius: 7px; padding: 6px 12px; text-align: left; min-width: 190px; }
                 QPushButton#recipeSwitcher:hover { background: #EEF5FC; border-color: #B9D2EB; }
+                QPushButton#titleAction:disabled, QToolButton#titleAction:disabled, QPushButton#windowButton:disabled { background: transparent; }
                 QComboBox#accessMode { background: #F1F7F3; color: #248A3D; border: 1px solid #CDE6D4; font-weight: 600; min-width: 94px; }
                 QPushButton#zoomButton { min-width: 34px; max-width: 34px; padding: 6px 0; font-size: 16px; }
                 QPushButton#windowButton { border: none; border-radius: 0; min-width: 36px; padding: 4px; background: transparent; font-size: 15px; }
@@ -135,21 +152,45 @@ class MainWindowBuilderMixin:
                 QPushButton#closeButton { border: none; border-radius: 0; min-width: 38px; padding: 4px; background: transparent; font-size: 17px; }
                 QPushButton#closeButton:hover { background: #E81123; color: #FFFFFF; }
                 QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox { background: #FFFFFF; border: 1px solid #D6DCE4; border-radius: 6px; padding: 5px 7px; min-height: 18px; }
+                QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled, QSpinBox:disabled { background: #F5F7FA; color: #A3ABB6; border-color: #E6EAEF; }
+                QComboBox { padding-right: 22px; }
+                QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: center right; width: 22px; border: none; background: transparent; }
+                QComboBox::down-arrow { image: url("%(chevron_down)s"); width: 10px; height: 10px; }
+                QComboBox QAbstractItemView { background: #FFFFFF; border: 1px solid #C9D1DB; selection-background-color: #EAF3FD; selection-color: #1D2530; outline: 0; }
+                QDoubleSpinBox, QSpinBox { padding-right: 22px; }
+                QDoubleSpinBox::up-button, QSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 20px; border: none; border-left: 1px solid #E6EAEF; border-top-right-radius: 5px; background: transparent; margin: 1px 1px 0 0; }
+                QDoubleSpinBox::down-button, QSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 20px; border: none; border-left: 1px solid #E6EAEF; border-bottom-right-radius: 5px; background: transparent; margin: 0 1px 1px 0; }
+                QDoubleSpinBox::up-button:hover, QSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover, QSpinBox::down-button:hover { background: #EEF2F6; }
+                QDoubleSpinBox::up-arrow, QSpinBox::up-arrow { image: url("%(chevron_up)s"); width: 10px; height: 10px; }
+                QDoubleSpinBox::down-arrow, QSpinBox::down-arrow { image: url("%(chevron_down)s"); width: 10px; height: 10px; }
+                QScrollBar:vertical { background: transparent; border: none; width: 10px; margin: 0; }
+                QScrollBar:horizontal { background: transparent; border: none; height: 10px; margin: 0; }
+                QScrollBar::handle:vertical { background: #C9D1DB; border-radius: 3px; min-height: 32px; margin: 2px; }
+                QScrollBar::handle:horizontal { background: #C9D1DB; border-radius: 3px; min-width: 32px; margin: 2px; }
+                QScrollBar::handle:hover { background: #9AA5B3; }
+                QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; border: none; background: transparent; }
+                QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+                QMenu { background: #FFFFFF; border: 1px solid #C9D1DB; padding: 4px; }
+                QMenu::item { background: transparent; padding: 6px 28px 6px 26px; border-radius: 4px; }
+                QMenu::item:selected { background: #EAF3FD; color: #1D2530; }
+                QMenu::item:disabled { color: #A3ABB6; background: transparent; }
+                QMenu::separator { height: 1px; background: #E6EAEF; margin: 4px 8px; }
+                QMenu::indicator { width: 14px; height: 14px; left: 6px; }
                 QTabWidget::pane { border: 1px solid #E0E4E9; border-radius: 7px; background: #FFFFFF; }
                 QTabBar::tab { background: #F5F7FA; border: 1px solid #E0E4E9; padding: 8px 12px; margin-right: 1px; border-top-left-radius: 5px; border-top-right-radius: 5px; }
                 QTabBar::tab:selected { background: #FFFFFF; color: #087EF4; font-weight: 600; border-bottom-color: #FFFFFF; }
+                QTabBar::tab:disabled { color: #A3ABB6; }
                 QTabWidget#sideTabs QTabBar::tab { padding: 9px 7px; font-size: 11px; }
-                QToolButton#sectionToggle { text-align: left; font-weight: 600; padding: 9px 10px; background: #FFFFFF; border: 1px solid #E0E4E9; border-radius: 7px; }
                 QScrollArea { border: none; background: #FFFFFF; }
                 QStatusBar { background: #FFFFFF; border-top: 1px solid #DEE3E9; color: #4B5563; min-height: 36px; }
                 QStatusBar::item { border: none; }
-                QProgressBar { border: none; border-radius: 5px; background: #EDF1F5; text-align: center; color: #68717D; }
-                QProgressBar::chunk { background: #087EF4; border-radius: 4px; }
+                QProgressBar { border: none; border-radius: 5px; background: #EDF1F5; text-align: center; color: #1D2530; }
+                QProgressBar::chunk { background: #A9D1FB; border-radius: 4px; }
                 QSplitter::handle { background: #EEF1F4; width: 7px; }
                 QMenu#recipeQuickMenu { background: #FFFFFF; border: 1px solid #C9D1DB; border-radius: 8px; padding: 0; }
                 QMenu#recipeQuickMenu QTreeWidget { border: 1px solid #E0E4E9; border-radius: 6px; background: #FFFFFF; alternate-background-color: #F8FAFC; }
                 QMenu#recipeQuickMenu QHeaderView::section { background: #F3F5F7; color: #68717D; border: none; border-bottom: 1px solid #E0E4E9; padding: 6px; }
-            """)
+            """ % {"chevron_down": chevron_down, "chevron_up": chevron_up, "check": ui_asset_url("check.png")})
 
         def _build_ui(self):
             central = QWidget()
@@ -441,7 +482,10 @@ class MainWindowBuilderMixin:
                 scroll.setWidget(page)
                 self.side_tabs.addTab(scroll, title)
             main_splitter.addWidget(self.side_tabs)
-            self.side_tabs.setMinimumWidth(340)
+            # Keep all five tabs visible without scroll arrows, whatever the platform font metrics are.
+            side_tab_bar = self.side_tabs.tabBar()
+            side_tab_bar.ensurePolished()
+            self.side_tabs.setMinimumWidth(min(480, max(340, side_tab_bar.sizeHint().width() + 12)))
             self.side_tabs.setMaximumWidth(480)
             main_splitter.setSizes([1030, 450])
             self.main_splitter = main_splitter
@@ -762,7 +806,8 @@ class MainWindowBuilderMixin:
             layout.addWidget(group_auto)
 
             roi_section = CollapsibleSection("环形 ROI 参数", True)
-            group_roi = QGroupBox("环形 ROI 参数")
+            group_roi = QGroupBox()
+            group_roi.setProperty("untitled", True)
             form_roi = QFormLayout(group_roi)
             self.roi_type_combo = SidebarComboBox()
             self.roi_type_combo.addItem("矩形区域", "Rectangle")
@@ -884,7 +929,8 @@ class MainWindowBuilderMixin:
             layout.addWidget(group_size)
 
             auto_rule_section = CollapsibleSection("自动识别高级规则", False)
-            group_auto_rule = QGroupBox("自动识别高级规则")
+            group_auto_rule = QGroupBox()
+            group_auto_rule.setProperty("untitled", True)
             form_auto_rule = QFormLayout(group_auto_rule)
             self.auto_ref_shape_combo = SidebarComboBox()
             self.auto_target_shape_combo = SidebarComboBox()
@@ -930,7 +976,8 @@ class MainWindowBuilderMixin:
                 combo.addItem("矩形拟合", "Rectangle")
 
             rz_section = CollapsibleSection("Mark 分布与 Rz", False)
-            group_rz = QGroupBox("Mark 分布 / Rz")
+            group_rz = QGroupBox()
+            group_rz.setProperty("untitled", True)
             form_rz = QFormLayout(group_rz)
             self.rz_layout_combo = SidebarComboBox()
             self.rz_layout_combo.addItems(["Y向前后分布", "X向左右分布"])
