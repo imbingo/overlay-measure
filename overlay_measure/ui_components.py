@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
+from .theme import ui_color
 from .auto_mark_detector import detect_auto_marks_with_report
 from .access_control import AccessController
 from .batch_pairing import validate_batch_pairing
@@ -196,12 +197,12 @@ class GrayProfilePlot(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#FFFFFF"))
+        painter.fillRect(self.rect(), QColor(ui_color("#FFFFFF", "background")))
         rect = self.rect().adjusted(50, 18, -18, -36)
-        painter.setPen(QPen(QColor("#D7DCE3"), 1))
+        painter.setPen(QPen(QColor(ui_color("#D7DCE3", "border")), 1))
         painter.drawRect(rect)
         if self.values.size < 2:
-            painter.setPen(QColor("#6B7280"))
+            painter.setPen(QColor(ui_color("#6B7280", "color")))
             painter.drawText(rect, Qt.AlignCenter, "在图像上拖动一条线以查看灰度剖面")
             return
         lo, hi = float(np.min(self.values)), float(np.max(self.values))
@@ -221,7 +222,7 @@ class GrayProfilePlot(QWidget):
         pen.setCosmetic(True)
         painter.setPen(pen)
         painter.drawPath(path)
-        painter.setPen(QColor("#4B5563"))
+        painter.setPen(QColor(ui_color("#4B5563", "color")))
         painter.setFont(QFont("Microsoft YaHei UI", 8))
         painter.drawText(4, int(rect.top() + 6), f"{hi:.3f}")
         painter.drawText(4, int(rect.bottom()), f"{lo:.3f}")
@@ -1668,7 +1669,7 @@ class ImageCanvas(QLabel):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#252930"))
+        painter.fillRect(self.rect(), QColor(ui_color("#252930", "background")))
 
         if self.pixmap_cache is None:
             painter.setPen(QColor("#F5F6F8"))
@@ -2774,13 +2775,13 @@ class RepeatabilityPlot(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#FFFFFF"))
+        painter.fillRect(self.rect(), QColor(ui_color("#FFFFFF", "background")))
         margin_l, margin_r, margin_t, margin_b = 46, 16, 18, 30
         rect = self.rect().adjusted(margin_l, margin_t, -margin_r, -margin_b)
-        painter.setPen(QPen(QColor("#DADDE3"), 1))
+        painter.setPen(QPen(QColor(ui_color("#DADDE3", "border")), 1))
         painter.drawRect(rect)
         if not self.series:
-            painter.setPen(QColor("#6E6E73"))
+            painter.setPen(QColor(ui_color("#6E6E73", "color")))
             painter.drawText(self.rect(), Qt.AlignCenter, "暂无重复性数据")
             painter.end()
             return
@@ -2795,7 +2796,7 @@ class RepeatabilityPlot(QWidget):
         if abs(vmax - vmin) < 1e-12:
             vmax = vmin + 1.0
             vmin = vmin - 1.0
-        painter.setPen(QColor("#6E6E73"))
+        painter.setPen(QColor(ui_color("#6E6E73", "color")))
         painter.drawText(8, rect.top() + 10, f"{vmax:.3f}")
         painter.drawText(8, rect.bottom(), f"{vmin:.3f}")
         palette = [QColor("#007AFF"), QColor("#FF9500"), QColor("#34C759"), QColor("#AF52DE")]
@@ -2813,6 +2814,6 @@ class RepeatabilityPlot(QWidget):
             for pt in points:
                 painter.drawEllipse(QRectF(pt.x() - 2.5, pt.y() - 2.5, 5, 5))
             painter.drawText(legend_x, self.rect().bottom() - 8 - 16 * idx, name)
-        painter.setPen(QColor("#6E6E73"))
+        painter.setPen(QColor(ui_color("#6E6E73", "color")))
         painter.drawText(rect.center().x() - 40, self.rect().bottom() - 8, "测量次数")
         painter.end()

@@ -3,6 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 import numpy as np
+from ..theme import save_light_snapshot
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
@@ -361,7 +362,7 @@ class MeasurementDiagnosticsDialog(QDialog):
                 / ("SOMA_Diagnostics_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f")),
             )
             self.overlay.grab().save(str(out / "edge_overlay.png"))
-            self.chart.grab().save(str(out / "current_curve.png"))
+            save_light_snapshot(self.chart, out / "current_curve.png")
             if self.profile is not None:
                 from ..result_exporter import export_data_tables
                 from .export import json_value

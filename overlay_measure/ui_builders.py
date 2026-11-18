@@ -88,6 +88,7 @@ from .ui_components import (
 )
 from .ui_recipe_views import RecipeLibraryDialog, RecipeQuickMenu
 from .ui_workers import MeasurementWorker
+from .theme import create_theme_button
 
 
 class MainWindowBuilderMixin:
@@ -229,6 +230,8 @@ class MainWindowBuilderMixin:
             title_row.addLayout(brand_text)
             title_row.addWidget(self.version_label)
             title_row.addWidget(self.operation_mode_combo)
+            self.theme_button = create_theme_button(toolbar_card)
+            title_row.addWidget(self.theme_button)
             title_row.addStretch(1)
 
             self.import_upper_btn = QPushButton("导入上层/单图")

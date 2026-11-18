@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Iterable
+from .theme import ThemeItemDelegate
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence
@@ -20,6 +21,7 @@ class ResultTableWidget(QTableWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setItemDelegate(ThemeItemDelegate(self))
         self._row_payloads: list[dict] = []
         self._delete_allowed = False
         self.setObjectName("resultTable")

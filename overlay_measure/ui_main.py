@@ -70,6 +70,7 @@ from .recipe_manager import load_recipe, load_recipe_with_geometry, save_recipe
 from .recipe_library import RecipeLibrary, RecipeLibraryEntry
 from .recent_image_store import RecentImageStore
 from .dialog_state_store import DialogStateStore
+from .theme import manager as theme_manager
 from .recipe_integrity import seal_recipe, verify_recipe
 from .result_exporter import build_detection_rows, export_results
 from .rz_calculator import build_summary_rows
@@ -213,6 +214,7 @@ class MainWindow(
         self.addAction(self._roi_redo_action)
         self._refresh_all_widgets()
         self._apply_operation_mode()
+        theme_manager().register(self)
         if QApplication.platformName().lower() != "offscreen":
             QTimer.singleShot(0, self._offer_recovery)
             QTimer.singleShot(200, self._warn_default_engineering_password)
@@ -435,6 +437,7 @@ class MainWindow(
                         "后台算法正在安全退出。请稍候，再次关闭窗口。",
                     )
                     return
+        theme_manager().unregister(self)
         super().closeEvent(event)
 
 

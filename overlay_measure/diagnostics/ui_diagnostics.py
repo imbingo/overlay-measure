@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 import numpy as np
 import cv2
+from ..theme import ui_color, save_light_snapshot
 from PySide6.QtCore import Qt, QPointF, QRectF, QThread, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
@@ -294,9 +295,9 @@ class ComparisonChart(QWidget):
         p.setFont(QFont("Microsoft YaHei UI", 8))
         for value in np.linspace(low, high, 5):
             yy = r.bottom() - (value - low) / (high - low) * r.height()
-            p.setPen(QColor("#E1E7EF"))
+            p.setPen(QColor(ui_color("#E1E7EF", "border", self)))
             p.drawLine(QPointF(r.left(), yy), QPointF(r.right(), yy))
-            p.setPen(QColor("#536071"))
+            p.setPen(QColor(ui_color("#536071", "color", self)))
             p.drawText(QPointF(r.left() - 60, yy + 4), f"{value:.4g}")
         for x in np.linspace(xmin, xmax, 7):
             p.drawText(
@@ -306,18 +307,18 @@ class ComparisonChart(QWidget):
                 ),
                 f"{x:.1f}",
             )
-        p.setPen(QColor("#273544"))
+        p.setPen(QColor(ui_color("#273544", "color", self)))
         p.setFont(QFont("Microsoft YaHei UI", 9))
         p.drawText(QPointF(r.left(), r.top() - 13), title)
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.fillRect(self.rect(), QColor("white"))
+        p.fillRect(self.rect(), QColor(ui_color("white", "background", self)))
         o = self.owner
         result = o.session.result
         if result is None:
-            p.setPen(QColor("#687587"))
+            p.setPen(QColor(ui_color("#687587", "color", self)))
             p.drawText(self.rect(), Qt.AlignCenter, "完成配准与分析后显示曲线")
             p.end()
             return
@@ -1249,7 +1250,7 @@ class DiagnosticsDialog(QDialog):
             export_session(self.session, output, excel=True)
             export_session(self.session, output, excel=False)
             self.overlay.grab().save(str(output / "edge_overlay.png"))
-            self.chart.grab().save(str(output / "current_view.png"))
+            save_light_snapshot(self.chart, output / "current_view.png")
             if self.profile is not None:
                 from ..result_exporter import export_data_tables
 
