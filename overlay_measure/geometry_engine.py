@@ -48,6 +48,13 @@ def _circle_from_three_points(points: list[Point]) -> tuple[Point, float]:
     return (float(center[0]), float(center[1])), radius
 
 
+def cross2d(a, b):
+    """z component of a 2-D cross product; np.cross dropped 2-D vectors in NumPy 2.5."""
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+
+
 def _line_intersection(a: list[Point], b: list[Point]) -> Point:
     if len(a) < 2 or len(b) < 2:
         raise ValueError("直线交点需要两条有效直线")
@@ -55,10 +62,10 @@ def _line_intersection(a: list[Point], b: list[Point]) -> Point:
     r = np.asarray(a[1], dtype=np.float64) - p
     q = np.asarray(b[0], dtype=np.float64)
     s = np.asarray(b[1], dtype=np.float64) - q
-    cross = float(np.cross(r, s))
+    cross = float(cross2d(r, s))
     if abs(cross) < 1e-10:
         raise ValueError("两条直线平行，无法计算交点")
-    t = float(np.cross(q - p, s) / cross)
+    t = float(cross2d(q - p, s) / cross)
     result = p + t * r
     return float(result[0]), float(result[1])
 
@@ -288,7 +295,7 @@ def _measurement(
         scaled_a = np.asarray([a[0] * config.pixel_size_x_um, a[1] * config.pixel_size_y_um])
         scaled_b = np.asarray([b[0] * config.pixel_size_x_um, b[1] * config.pixel_size_y_um])
         direction = scaled_b - scaled_a
-        value = float(abs(np.cross(direction, scaled_point - scaled_a)) / max(np.linalg.norm(direction), 1e-12))
+        value = float(abs(cross2d(direction, scaled_point - scaled_a)) / max(np.linalg.norm(direction), 1e-12))
         path = "点到直线正交距离"
     elif kind == "line_angle":
         value = _line_angle_deg(_feature_line(refs[0]), config)
