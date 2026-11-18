@@ -6,6 +6,7 @@ import numpy as np
 from .models import DetectionParams, DetectionResult, ImageData, MeasurementConfig, Roi
 from .quality_profiles import annotate_detection_quality
 from .measurement_units import scalar_px_to_um
+from .geometry_engine import cross2d
 
 
 def _sample_bilinear(image: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
@@ -96,7 +97,7 @@ def detect_approximate_line(
         direction = np.asarray((float(vx), float(vy)), dtype=np.float64)
         direction /= max(np.linalg.norm(direction), 1e-12)
         origin = np.asarray((float(x0), float(y0)), dtype=np.float64)
-        distances = np.abs(np.cross(direction, values - origin))
+        distances = np.abs(cross2d(direction, values - origin))
         return origin, direction, distances
 
     origin, direction, distances = fit(pts)
