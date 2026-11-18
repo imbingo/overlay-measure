@@ -1,5 +1,10 @@
 # Changelog
 
+## V2.6.2 近似直线兼容性修复
+
+- 修复 NumPy 2.5 移除二维 `np.cross` 后，近似直线 ROI 分析报错“Both input arrays must be (arrays of) 3-dimensional vectors”的问题。
+- 同步修复几何工具中的直线交点与点到直线距离；计算结果与之前一致。
+
 ## V2.6.1 界面打磨与中文用户手册
 
 - 统一下拉框、数值框、滚动条与复选框样式；禁用按钮、进度条 100% 文字与空结果表横向滚动条显示修复。

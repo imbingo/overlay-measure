@@ -1,5 +1,9 @@
 # SOMA Vision Metrology
 
+## V2.6.2 近似直线兼容性修复
+
+- 修复近似直线 ROI 分析报错“Both input arrays must be 3-dimensional vectors”，几何工具的直线交点与点到直线距离同步修复。
+
 ## V2.6.1 界面打磨与用户手册
 
 - 统一控件样式与禁用态显示，修复进度条、空结果表和窄窗口下的显示问题。
@@ -150,7 +154,7 @@
 
 ## 当前版本
 
-- 当前代码版本：V2.6.1
+- 当前代码版本：V2.6.2
 - 来源文件：`overlay_mark_measure_v1_4_2.zip`
 - Windows 启动文件：`start_overlay_measure.bat`
 - Python 主入口：`main.py`
