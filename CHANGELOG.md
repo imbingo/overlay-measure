@@ -1,5 +1,11 @@
 # Changelog
 
+## V2.6.3 批量 ROI 切换视图保持
+
+- 修复批量导入后，放大查看时切换 ROI 导致画面恢复全图、位置跳动的问题。
+- 同一批次图片的 ROI 切换复用当前预览；切换图片或重新导入时仍正常重置视图。
+- 仅保留各 Mark / 图层的当前预览，避免重复读图，不缓存整批原图。
+
 ## V2.6.2 近似直线兼容性修复
 
 - 修复 NumPy 2.5 移除二维 `np.cross` 后，近似直线 ROI 分析报错“Both input arrays must be (arrays of) 3-dimensional vectors”的问题。

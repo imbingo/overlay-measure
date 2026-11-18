@@ -739,11 +739,25 @@ class MainWindowStateMixin:
 
         def _active_image_for_layer(self, mark_id: str, layer: str) -> Optional[ImageData]:
             self._ensure_mark_runtime(mark_id)
+            if not hasattr(self, "_batch_preview_image_cache"):
+                self._batch_preview_image_cache = {}
+            cache = self._batch_preview_image_cache
+            key = (mark_id, layer)
             if self._is_batch_mode():
                 images = self.batch_images.get(mark_id, {}).get(layer, [])
                 if images:
                     index = max(0, min(len(images) - 1, self._batch_detail_last_single_index - 1))
-                    return resolve_image(images[index])
+                    source = images[index]
+                    cached = cache.get(key)
+                    # Keep only the active preview per Mark/layer. ROI refreshes
+                    # reuse its pixels and view; a new source (including a
+                    # reimport of the same path) still resets the canvas.
+                    if cached is not None and cached[0] is source:
+                        return cached[1]
+                    image = resolve_image(source)
+                    cache[key] = (source, image)
+                    return image
+            cache.pop(key, None)
             image = self.mark_images[mark_id][layer]
             if image is None:
                 return None
