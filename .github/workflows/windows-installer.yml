@@ -69,6 +69,17 @@ jobs:
           try {
             ./scripts/build_release.ps1 -Python (Get-Command python).Source *>&1 | Tee-Object -FilePath $BuildLog
           }
+          catch {
+            Write-Output "::error title=Windows build failure::Native exit code $LASTEXITCODE; $($_.Exception.Message)"
+            if (Test-Path $BuildLog) {
+              $Details = Get-Content $BuildLog -Tail 160 | Where-Object { $_ -match 'FAILED |ERROR |AssertionError|passed|failed|Fatal|Exception|Tests failed' } | Select-Object -Last 12
+              foreach ($Detail in $Details) {
+                $SafeDetail = ([string]$Detail).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+                Write-Output "::error title=Build diagnostic::$SafeDetail"
+              }
+            }
+            throw
+          }
           finally {
             if (Test-Path $BuildLog) {
               $Summary = @('## Windows build output', '```text') + (Get-Content $BuildLog -Tail 160) + @('```')
