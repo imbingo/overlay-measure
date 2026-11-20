@@ -417,6 +417,10 @@ class MainWindow(
         self._update_toolbar_density()
 
     def closeEvent(self, event):
+        comparison = getattr(self, "_parameter_comparison_dialog", None)
+        if comparison is not None and not comparison.close():
+            event.ignore()
+            return
         diagnostics = getattr(self, "_soma_diagnostics_dialog", None)
         if diagnostics is not None and diagnostics.worker is not None and diagnostics.worker.isRunning():
             event.ignore()

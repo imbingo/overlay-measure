@@ -181,6 +181,8 @@ class MainWindowStateMixin:
                 self.image_diagnostics_action.setEnabled(engineering and not self._calculation_running)
             if hasattr(self, "soma_diagnostics_action"):
                 self.soma_diagnostics_action.setEnabled(engineering and not self._calculation_running)
+            if hasattr(self, "parameter_comparison_action"):
+                self.parameter_comparison_action.setEnabled(engineering and not self._calculation_running)
             self.analyze_roi_btn.setEnabled(
                 not self._calculation_running and not self._is_auto_workflow()
             )

@@ -167,6 +167,7 @@ def detect_caliper_circle(
     gray: np.ndarray, roi: Roi, params: DetectionParams, *,
     diagnostics: list[dict] | None = None,
     sampling_transform: np.ndarray | None = None,
+    cancelled=None,
 ) -> CaliperCircleResult:
     """Extract and fit using the production algorithm.
 
@@ -211,6 +212,8 @@ def detect_caliper_circle(
     windows: List[dict] = []
 
     for index in range(count):
+        if cancelled and cancelled():
+            raise InterruptedError("用户取消预览")
         angle = 2.0 * np.pi * index / count
         radial = np.array([np.cos(angle), np.sin(angle)], dtype=np.float64)
         tangent = np.array([-np.sin(angle), np.cos(angle)], dtype=np.float64)
@@ -223,7 +226,9 @@ def detect_caliper_circle(
 
         profile = []
         sample_counts = [] if diagnostics is not None else None
-        for sample_distance in radial_samples:
+        for sample_index, sample_distance in enumerate(radial_samples):
+            if cancelled and sample_index % 32 == 0 and cancelled():
+                raise InterruptedError("用户取消预览")
             sample_center = start + search_vector * float(sample_distance)
             if sampling_transform is not None:
                 sample_xy = sample_center + tangent_offsets[:, None] * tangent
@@ -281,7 +286,7 @@ def detect_caliper_circle(
                 "candidates": [dict(sub_index=s, gradient=g, above_threshold=g >= float(params.min_gradient))
                                for s, g in profile_candidates],
                 "selected": None, "inlier": False,
-                "status": ("below_gradient_threshold" if profile_candidates else "no_peak") if profile else "outside_image",
+                "status": ("pending_fit" if group else "below_gradient_threshold" if profile_candidates else "no_peak") if profile else "outside_image",
                 "gaussian_sigma_px": sigma, "step_px": radial_step,
                 "interpolation": "bilinear; finite tangent samples averaged",
             })
@@ -308,6 +313,12 @@ def detect_caliper_circle(
     else:
         selected = initial
 
+    if diagnostics is not None:
+        for candidate in selected:
+            record = diagnostics[trace_start + int(candidate["window_index"])]
+            record["selected"] = candidate.copy()
+            record["selected_distance_px"] = float(np.hypot(candidate["x"] - record["start"][0], candidate["y"] - record["start"][1]))
+            record["status"] = "not_fitted"
     if len(selected) < max(3, min(8, count // 4)):
         raise ValueError(f"卡尺找圆有效边缘点不足：{len(selected)}")
 
@@ -317,11 +328,15 @@ def detect_caliper_circle(
         windows[int(candidate["window_index"])]["accepted"] = True
         windows[int(candidate["window_index"])]["selected_radius"] = candidate["roi_radius"]
 
-    if params.use_ransac and len(points) >= 6:
+    fit_trace = {} if diagnostics is not None else None
+    ransac_used = bool(params.use_ransac and len(points) >= 6)
+    if ransac_used:
         fit_cx, fit_cy, radius, residual, mask = fit_circle_ransac(
             points,
             params.residual_limit_px,
             iterations=400,
+            cancelled=cancelled,
+            diagnostics=fit_trace,
         )
     else:
         initial_cx, initial_cy, initial_radius, _ = fit_circle_least_squares(points)
@@ -333,11 +348,17 @@ def detect_caliper_circle(
 
     inlier_count = int(np.sum(mask))
     if diagnostics is not None:
-        for candidate, inlier in zip(selected, mask):
+        for point_index, (candidate, inlier) in enumerate(zip(selected, mask)):
             record = diagnostics[trace_start + int(candidate["window_index"])]
             record["selected"] = candidate.copy()
             record["inlier"] = bool(inlier)
             record["status"] = "valid" if inlier else "fit_rejected"
+            record["ransac_used"] = ransac_used
+            record["fit_model_available"] = bool(fit_trace and fit_trace.get("model") is not None)
+            record["fit_fallback"] = bool(fit_trace and fit_trace.get("fallback"))
+            record["fit_threshold_px"] = fit_trace.get("threshold_px") if fit_trace else None
+            errors = fit_trace.get("errors_px") if fit_trace else None
+            record["fit_error_px"] = float(errors[point_index]) if errors is not None else None
     inlier_points = points[mask]
     stats = circle_diameter_statistics(inlier_points, fit_cx, fit_cy)
     radius = stats["average_radius_px"] or radius

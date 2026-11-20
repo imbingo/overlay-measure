@@ -153,6 +153,8 @@ def fit_circle_ransac(
     residual_limit_px: float,
     iterations: int = 250,
     cancelled: Optional[Callable[[], bool]] = None,
+    *,
+    diagnostics: dict | None = None,
 ) -> Tuple[float, float, float, float, np.ndarray]:
     n = len(points)
     if n < 3:
@@ -161,6 +163,7 @@ def fit_circle_ransac(
     best_mask = np.ones(n, dtype=bool)
     best_score = -1
     best_residual = float("inf")
+    best_model = None
 
     # The UI labels this value as the rejection threshold, so use it directly.
     # Earlier versions silently multiplied it by 2.5, allowing mixed inner and
@@ -183,9 +186,17 @@ def fit_circle_ransac(
             best_score = score
             best_mask = mask
             best_residual = residual
+            best_model = (float(cx), float(cy), float(r))
 
-    if int(np.sum(best_mask)) < max(3, min(20, int(0.2 * n))):
+    fallback = int(np.sum(best_mask)) < max(3, min(20, int(0.2 * n)))
+    if fallback:
         best_mask = np.ones(n, dtype=bool)
+    if diagnostics is not None:
+        errors = None
+        if best_model is not None:
+            bx, by, br = best_model
+            errors = np.abs(np.sqrt((points[:, 0] - bx) ** 2 + (points[:, 1] - by) ** 2) - br)
+        diagnostics.update(threshold_px=thresh, model=best_model, errors_px=errors, fallback=fallback)
     initial_cx, initial_cy, initial_r, _ = fit_circle_least_squares(points[best_mask])
     cx, cy, r, residual = fit_circle_geometric_robust(
         points[best_mask],

@@ -190,6 +190,32 @@ class MainWindowWorkflowMixin:
             dialog.raise_()
             dialog.activateWindow()
 
+        def start_parameter_comparison(self):
+            if self.operation_mode != "Engineering" or self._calculation_running:
+                QMessageBox.information(self, "调参对比", "请在工程模式且正式测量空闲时打开。")
+                return
+            from .parameter_comparison import available_rois
+            from .ui_parameter_comparison import ParameterComparisonDialog
+            if not available_rois(self):
+                QMessageBox.information(self, "调参对比", "首版支持已创建的卡尺圆 ROI。请先导入图像并创建卡尺圆 ROI。")
+                return
+            dialog = getattr(self, "_parameter_comparison_dialog", None)
+            if dialog is not None and not dialog._closing:
+                dialog.show()
+                dialog.raise_()
+                dialog.activateWindow()
+                return
+            dialog = ParameterComparisonDialog(self)
+            dialog.setAttribute(Qt.WA_DeleteOnClose)
+            self._parameter_comparison_dialog = dialog
+            def clear_reference(*_):
+                if getattr(self, "_parameter_comparison_dialog", None) is dialog:
+                    self._parameter_comparison_dialog = None
+            dialog.destroyed.connect(clear_reference)
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+
         def start_image_diagnostics(self):
             if self.operation_mode != "Engineering":
                 QMessageBox.information(self, "图像诊断", "图像诊断仅在工程模式下可用。")

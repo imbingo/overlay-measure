@@ -10,7 +10,7 @@ from typing import Dict, Optional
 
 import numpy as np
 from PIL import Image
-from PySide6.QtCore import QDir, QObject, QPoint, QPointF, QRectF, QSize, QThread, QTimer, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import QDir, QEvent, QObject, QPoint, QPointF, QRectF, QSize, QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
@@ -2634,9 +2634,12 @@ class ImageViewerDialog(QDialog):
     def __init__(self, source_canvases: list[ImageCanvas], parent=None):
         super().__init__(parent)
         self.setWindowTitle("图像查看器")
+        self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
         self.setMinimumSize(760, 560)
         self.resize(1240, 820)
         self._canvases: list[ImageCanvas] = []
+        self._fullscreen_geometry = None
+        self._fullscreen_state = Qt.WindowNoState
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
@@ -2645,6 +2648,7 @@ class ImageViewerDialog(QDialog):
         toolbar = QHBoxLayout()
         hint = QLabel("只读查看  ·  滚轮缩放  ·  中键或空格拖动平移  ·  双击适应窗口")
         hint.setStyleSheet("color: #5F6B7A;")
+        hint.setWordWrap(True)
         self.zoom_out_btn = QPushButton("−")
         self.zoom_combo = QComboBox()
         self.zoom_combo.addItems(["25%", "50%", "75%", "100%", "125%", "150%", "200%", "300%", "400%", "800%"])
@@ -2652,6 +2656,8 @@ class ImageViewerDialog(QDialog):
         self.zoom_in_btn = QPushButton("+")
         self.fit_btn = QPushButton("适应窗口")
         self.actual_size_btn = QPushButton("1:1")
+        self.fullscreen_btn = QPushButton("全屏")
+        self.fullscreen_btn.setToolTip("全屏查看（F11）；按 Esc 退出全屏")
         self.close_btn = QPushButton("关闭")
         toolbar.addWidget(hint, 1)
         toolbar.addWidget(self.zoom_out_btn)
@@ -2659,6 +2665,7 @@ class ImageViewerDialog(QDialog):
         toolbar.addWidget(self.zoom_in_btn)
         toolbar.addWidget(self.fit_btn)
         toolbar.addWidget(self.actual_size_btn)
+        toolbar.addWidget(self.fullscreen_btn)
         toolbar.addWidget(self.close_btn)
         root.addLayout(toolbar)
 
@@ -2676,7 +2683,40 @@ class ImageViewerDialog(QDialog):
         self.zoom_combo.currentTextChanged.connect(self._set_zoom_percent)
         self.fit_btn.clicked.connect(self._fit_view)
         self.actual_size_btn.clicked.connect(self._show_actual_pixels)
+        self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
         self.close_btn.clicked.connect(self.close)
+        self.fullscreen_action = QAction("切换图像查看器全屏", self)
+        self.fullscreen_action.setShortcut("F11")
+        self.fullscreen_action.triggered.connect(self.toggle_fullscreen)
+        self.addAction(self.fullscreen_action)
+        self.exit_fullscreen_action = QAction("退出图像查看器全屏", self)
+        self.exit_fullscreen_action.setShortcut("Esc")
+        self.exit_fullscreen_action.setEnabled(False)
+        self.exit_fullscreen_action.triggered.connect(self.toggle_fullscreen)
+        self.addAction(self.exit_fullscreen_action)
+
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            if self._fullscreen_state & Qt.WindowMaximized:
+                self.showMaximized()
+            else:
+                self.showNormal()
+                if self._fullscreen_geometry is not None:
+                    self.restoreGeometry(self._fullscreen_geometry)
+        else:
+            self._fullscreen_geometry = self.saveGeometry()
+            self._fullscreen_state = self.windowState()
+            self.showFullScreen()
+        self._sync_fullscreen_controls()
+
+    def _sync_fullscreen_controls(self):
+        self.fullscreen_btn.setText("退出全屏" if self.isFullScreen() else "全屏")
+        self.exit_fullscreen_action.setEnabled(self.isFullScreen())
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange and hasattr(self, "exit_fullscreen_action"):
+            self._sync_fullscreen_controls()
 
     @staticmethod
     def _create_canvas_snapshot(source: ImageCanvas) -> ImageCanvas:
