@@ -7,7 +7,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtTest import QTest
 
 from overlay_measure.recent_image_store import RecentImageStore
@@ -82,5 +82,8 @@ def test_image_viewer_fullscreen_button_f11_and_escape_preserve_view(dual, maxim
             assert not current.roi_editing_enabled
     finally:
         viewer.close()
+        viewer.deleteLater()
         source.close()
+        source.deleteLater()
+        QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         app.processEvents()
