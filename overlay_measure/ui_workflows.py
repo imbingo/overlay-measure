@@ -722,6 +722,12 @@ class MainWindowWorkflowMixin:
 
         def on_three_point_circle_toggled(self, checked: bool):
             if checked:
+                if self._current_roi_entry() is not None:
+                    # Three-point picking creates a new ROI, like dragging on blank canvas.
+                    self.clear_roi_selection()
+                    self.three_point_circle_btn.blockSignals(True)
+                    self.three_point_circle_btn.setChecked(True)
+                    self.three_point_circle_btn.blockSignals(False)
                 self._set_combo_value(self.roi_type_combo, "Caliper Circle")
             self.upper_canvas.set_circle_pick_mode(checked)
             self.lower_canvas.set_circle_pick_mode(checked)
