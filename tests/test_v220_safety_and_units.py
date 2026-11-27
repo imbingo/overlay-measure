@@ -85,13 +85,13 @@ def test_manual_overlay_keeps_good_roi_when_another_fails(monkeypatch):
     assert measured["failures"][0]["status"] == "Error"
 
 
-def test_production_mode_blocks_canvas_and_backend_roi_edits():
+def test_startup_allows_roi_edits_with_production_mode_retired():
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
-    assert window.operation_mode == "Production"
-    assert window.upper_canvas.roi_editing_enabled is False
+    assert window.operation_mode == "Engineering"
+    assert window.upper_canvas.roi_editing_enabled is True
     window.set_roi("Mark1", "upper", Roi(0, 0, 20, 20, "Circle"))
-    assert window.marks["Mark1"].upper_rois == []
+    assert len(window.marks["Mark1"].upper_rois) == 1
     window.close()
 
 

@@ -394,33 +394,38 @@ class MainWindowWorkflowMixin:
                             "提示": overlay.warning,
                         })
                 if overlays:
-                    dxs = np.asarray([o.delta_x_um for o in overlays], dtype=float)
-                    dys = np.asarray([o.delta_y_um for o in overlays], dtype=float)
-                    rs = np.asarray([o.overlay_r_um for o in overlays], dtype=float)
-                    if len(overlays) >= 2:
-                        dx_3sigma = float(3.0 * np.std(dxs, ddof=1))
-                        dy_3sigma = float(3.0 * np.std(dys, ddof=1))
-                        r_3sigma = float(3.0 * np.std(rs, ddof=1))
-                    else:
-                        dx_3sigma = dy_3sigma = r_3sigma = 0.0
-                    rows.append({
-                        "Mark": mark_id,
-                        "次数": "统计",
-                        "上层/单图文件": "",
-                        "下层文件": "",
-                        "Dx(μm)": float(np.mean(dxs)),
-                        "Dy(μm)": float(np.mean(dys)),
-                        "Dxy(μm)": float(np.mean(rs)),
-                        "均值向量Dxy(μm)": float(np.hypot(np.mean(dxs), np.mean(dys))),
-                        "3σ-Dx(μm)": dx_3sigma,
-                        "3σ-Dy(μm)": dy_3sigma,
-                        "3σ-Dxy(μm)": r_3sigma,
-                        "PV-Dx(μm)": float(np.max(dxs) - np.min(dxs)),
-                        "PV-Dy(μm)": float(np.max(dys) - np.min(dys)),
-                        "PV-Dxy(μm)": float(np.max(rs) - np.min(rs)),
-                        "判定": "-",
-                        "提示": "多次测量统计",
-                    })
+                    finite_overlays = [
+                        o for o in overlays
+                        if np.isfinite(o.delta_x_um) and np.isfinite(o.delta_y_um) and np.isfinite(o.overlay_r_um)
+                    ]
+                    if finite_overlays:
+                        dxs = np.asarray([o.delta_x_um for o in finite_overlays], dtype=float)
+                        dys = np.asarray([o.delta_y_um for o in finite_overlays], dtype=float)
+                        rs = np.asarray([o.overlay_r_um for o in finite_overlays], dtype=float)
+                        if len(finite_overlays) >= 2:
+                            dx_3sigma = float(3.0 * np.std(dxs, ddof=1))
+                            dy_3sigma = float(3.0 * np.std(dys, ddof=1))
+                            r_3sigma = float(3.0 * np.std(rs, ddof=1))
+                        else:
+                            dx_3sigma = dy_3sigma = r_3sigma = 0.0
+                        rows.append({
+                            "Mark": mark_id,
+                            "次数": "统计",
+                            "上层/单图文件": "",
+                            "下层文件": "",
+                            "Dx(μm)": float(np.mean(dxs)),
+                            "Dy(μm)": float(np.mean(dys)),
+                            "Dxy(μm)": float(np.mean(rs)),
+                            "均值向量Dxy(μm)": float(np.hypot(np.mean(dxs), np.mean(dys))),
+                            "3σ-Dx(μm)": dx_3sigma,
+                            "3σ-Dy(μm)": dy_3sigma,
+                            "3σ-Dxy(μm)": r_3sigma,
+                            "PV-Dx(μm)": float(np.max(dxs) - np.min(dxs)),
+                            "PV-Dy(μm)": float(np.max(dys) - np.min(dys)),
+                            "PV-Dxy(μm)": float(np.max(rs) - np.min(rs)),
+                            "判定": "-",
+                            "提示": "多次测量统计",
+                        })
             return rows
 
         def on_mode_changed(self, *args):
@@ -602,8 +607,22 @@ class MainWindowWorkflowMixin:
                 elif previous_target:
                     self.auto_target_combo.setCurrentIndex(-1)
                 elif self._is_auto_workflow():
-                    default_index = 1 if self.auto_target_combo.count() > 1 else -1
-                    self.auto_target_combo.setCurrentIndex(default_index)
+                    auto_map = self._current_auto_detections()
+                    reference_id = self.auto_reference_combo.currentData() or ""
+                    default_id = next(
+                        (
+                            cand_id for cand_id, layer_map in auto_map.items()
+                            if cand_id != reference_id
+                            and next(iter(layer_map.values())).layer == "lower"
+                            and self.auto_target_combo.findData(cand_id) >= 0
+                        ),
+                        "",
+                    )
+                    if default_id:
+                        self.auto_target_combo.setCurrentIndex(self.auto_target_combo.findData(default_id))
+                    else:
+                        default_index = 1 if self.auto_target_combo.count() > 1 else -1
+                        self.auto_target_combo.setCurrentIndex(default_index)
                 elif mark_id in self._manual_selection_requires_review:
                     self.auto_target_combo.setCurrentIndex(-1)
                 else:
@@ -619,14 +638,16 @@ class MainWindowWorkflowMixin:
                     self.auto_target_combo.setCurrentIndex(self.auto_target_combo.findData(default_id))
             self.auto_reference_combo.blockSignals(False)
             self.auto_target_combo.blockSignals(False)
-            self.auto_selections[mark_id] = {
-                "reference_label": self.auto_reference_combo.currentData() or "",
-                "target_label": self.auto_target_combo.currentData() or "",
-            }
-            mark = self.marks.get(mark_id)
-            if mark is not None:
-                mark.reference_contour_id = self.auto_selections[mark_id]["reference_label"]
-                mark.target_contour_id = self.auto_selections[mark_id]["target_label"]
+            has_options = self.auto_reference_combo.count() > 0 or self.auto_target_combo.count() > 0
+            if has_options:
+                self.auto_selections[mark_id] = {
+                    "reference_label": self.auto_reference_combo.currentData() or "",
+                    "target_label": self.auto_target_combo.currentData() or "",
+                }
+                mark = self.marks.get(mark_id)
+                if mark is not None:
+                    mark.reference_contour_id = self.auto_selections[mark_id]["reference_label"]
+                    mark.target_contour_id = self.auto_selections[mark_id]["target_label"]
 
         def auto_identify_marks(self, show_message: bool = True):
             self._pull_config_from_ui()
@@ -946,55 +967,42 @@ class MainWindowWorkflowMixin:
                             "kind": "batch_run", "run_index": idx,
                         })
                 if overlays:
-                    dxs = np.asarray([o.delta_x_um for o in overlays], dtype=float)
-                    dys = np.asarray([o.delta_y_um for o in overlays], dtype=float)
-                    rs = np.asarray([o.overlay_r_um for o in overlays], dtype=float)
-                    if len(overlays) >= 2:
-                        dx_3sigma = float(3.0 * np.std(dxs, ddof=1))
-                        dy_3sigma = float(3.0 * np.std(dys, ddof=1))
-                        r_3sigma = float(3.0 * np.std(rs, ddof=1))
-                    else:
-                        dx_3sigma = dy_3sigma = r_3sigma = 0.0
-                    dx_pv = float(np.max(dxs) - np.min(dxs))
-                    dy_pv = float(np.max(dys) - np.min(dys))
-                    r_pv = float(np.max(rs) - np.min(rs))
-                    rows.append([
-                        mark_id,
-                        "统计",
-                        f"均值={np.mean(dxs):+.3f}; 3σ={dx_3sigma:.3f}; PV={dx_pv:.3f}",
-                        f"均值={np.mean(dys):+.3f}; 3σ={dy_3sigma:.3f}; PV={dy_pv:.3f}",
-                        f"均值={np.mean(rs):.3f}; 3σ={r_3sigma:.3f}; PV={r_pv:.3f}",
-                        "-",
-                        "重复性统计",
-                    ])
-                    row_payloads.append({
-                        "kind": "repeat_stat", "mark_id": mark_id, "deletable": False,
-                    })
+                    finite_overlays = [
+                        o for o in overlays
+                        if np.isfinite(o.delta_x_um) and np.isfinite(o.delta_y_um) and np.isfinite(o.overlay_r_um)
+                    ]
+                    if finite_overlays:
+                        dxs = np.asarray([o.delta_x_um for o in finite_overlays], dtype=float)
+                        dys = np.asarray([o.delta_y_um for o in finite_overlays], dtype=float)
+                        rs = np.asarray([o.overlay_r_um for o in finite_overlays], dtype=float)
+                        if len(finite_overlays) >= 2:
+                            dx_3sigma = float(3.0 * np.std(dxs, ddof=1))
+                            dy_3sigma = float(3.0 * np.std(dys, ddof=1))
+                            r_3sigma = float(3.0 * np.std(rs, ddof=1))
+                        else:
+                            dx_3sigma = dy_3sigma = r_3sigma = 0.0
+                        dx_pv = float(np.max(dxs) - np.min(dxs))
+                        dy_pv = float(np.max(dys) - np.min(dys))
+                        r_pv = float(np.max(rs) - np.min(rs))
+                        rows.append([
+                            mark_id,
+                            "统计",
+                            f"均值={np.mean(dxs):+.3f}; 3σ={dx_3sigma:.3f}; PV={dx_pv:.3f}",
+                            f"均值={np.mean(dys):+.3f}; 3σ={dy_3sigma:.3f}; PV={dy_pv:.3f}",
+                            f"均值={np.mean(rs):.3f}; 3σ={r_3sigma:.3f}; PV={r_pv:.3f}",
+                            "-",
+                            "重复性统计",
+                        ])
+                        row_payloads.append({
+                            "kind": "repeat_stat", "mark_id": mark_id, "deletable": False,
+                        })
             self._fill_table(self.repeat_table, headers, rows, row_payloads)
 
         def _mean_overlay(self, mark_id: str, overlays: list[OverlayResult]) -> Optional[OverlayResult]:
             if not overlays:
                 return None
-            dx = float(np.mean([o.delta_x_um for o in overlays]))
-            dy = float(np.mean([o.delta_y_um for o in overlays]))
-            r = float(np.hypot(dx, dy))
-            warnings = []
-            if abs(dx) > self.config.delta_x_limit_um:
-                warnings.append("Dx均值超限")
-            if abs(dy) > self.config.delta_y_limit_um:
-                warnings.append("Dy均值超限")
-            if r > self.config.overlay_r_limit_um:
-                warnings.append("Dxy均值超限")
-            return OverlayResult(
-                mark_id=mark_id,
-                delta_x_px=0.0,
-                delta_y_px=0.0,
-                delta_x_um=dx,
-                delta_y_um=dy,
-                overlay_r_um=r,
-                result="Fail" if warnings else "Pass",
-                warning="；".join(warnings),
-            )
+            from .measurement_engine import _mean_overlay as engine_mean_overlay
+            return engine_mean_overlay(mark_id, overlays, self.config)
 
         def calculate_batch_overlays(self):
             return self._start_measurement_job()
@@ -1312,7 +1320,7 @@ class MainWindowWorkflowMixin:
             worker.failed.connect(self._on_preview_failed, Qt.QueuedConnection)
             worker.cancelled.connect(self._on_preview_cancelled, Qt.QueuedConnection)
             for signal in (worker.finished, worker.failed, worker.cancelled):
-                signal.connect(thread.quit)
+                signal.connect(thread.quit, Qt.DirectConnection)
                 signal.connect(worker.deleteLater)
             thread.finished.connect(thread.deleteLater)
             thread.finished.connect(self._on_preview_thread_finished, Qt.QueuedConnection)
@@ -1347,17 +1355,6 @@ class MainWindowWorkflowMixin:
                 self.overlays.pop(mark_id, None)
                 failures = measured.get("failures", [])
                 self.roi_detection_failures[mark_id] = failures
-                if failures and self._preview_show_message:
-                    dialog = QMessageBox.warning if measured["detections"] else QMessageBox.critical
-                    dialog(
-                        self,
-                        "ROI 区域部分完成" if measured["detections"] else "ROI 区域分析失败",
-                        "\n".join(
-                            f"{LAYER_LABELS.get(item['layer'], item['layer'])} {item['roi_label']}："
-                            f"{self._friendly_error(Exception(item['error']))}"
-                            for item in failures
-                        ),
-                    )
                 self._append_log(
                     f"{mark_id} ROI 分析完成：{len(measured['detections'])} 个成功，{len(failures)} 个失败。"
                 )
@@ -1369,6 +1366,19 @@ class MainWindowWorkflowMixin:
                 )
             self._refresh_auto_selection_combos()
             self._refresh_all_widgets()
+            if payload["kind"] != "auto":
+                failures = measured.get("failures", [])
+                if failures and self._preview_show_message:
+                    dialog = QMessageBox.warning if measured["detections"] else QMessageBox.critical
+                    dialog(
+                        self,
+                        "ROI 区域部分完成" if measured["detections"] else "ROI 区域分析失败",
+                        "\n".join(
+                            f"{LAYER_LABELS.get(item['layer'], item['layer'])} {item['roi_label']}："
+                            f"{self._friendly_error(Exception(item['error']))}"
+                            for item in failures
+                        ),
+                    )
 
         def _on_preview_failed(self, message: str):
             self.runtime_logger.error("Preview analysis failed: %s", message)
@@ -1490,6 +1500,9 @@ class MainWindowWorkflowMixin:
             self.reset_measurement_action.setEnabled(not running)
             self.fit_view_action.setEnabled(not running)
             self.operation_mode_combo.setEnabled(not running)
+            self.mode_combo.setEnabled(not running)
+            if hasattr(self, "batch_detail_combo"):
+                self.batch_detail_combo.setEnabled(not running)
             self.side_tabs.setEnabled(not running)
             for table_name in ("det_table", "overlay_table", "geometry_table", "repeat_table"):
                 table = getattr(self, table_name, None)
@@ -1500,17 +1513,6 @@ class MainWindowWorkflowMixin:
 
         def _production_preflight_errors(self) -> list[str]:
             errors: list[str] = []
-            if self.operation_mode == "Production":
-                if not self.loaded_recipe_path:
-                    errors.append("生产模式必须加载配方")
-                if self.config.recipe_validation_status != "Validated":
-                    errors.append("生产模式只能使用已验证配方")
-                if self.recipe_integrity_status != "Verified":
-                    errors.append("生产配方尚未签章或哈希未验证")
-                if not self.config.material_code.strip():
-                    errors.append("物料编码不能为空")
-                if not self.config.operator_name.strip():
-                    errors.append("操作人员不能为空")
             if self._is_batch_mode():
                 errors.extend(validate_batch_pairing(self.batch_images, self.config.mode == "Dual Image"))
             return errors
@@ -1647,7 +1649,7 @@ class MainWindowWorkflowMixin:
             worker.failed.connect(self._on_calculation_failed, Qt.QueuedConnection)
             worker.cancelled.connect(self._on_calculation_cancelled, Qt.QueuedConnection)
             for signal in (worker.finished, worker.failed, worker.cancelled):
-                signal.connect(thread.quit)
+                signal.connect(thread.quit, Qt.DirectConnection)
                 signal.connect(worker.deleteLater)
             thread.finished.connect(thread.deleteLater)
             thread.finished.connect(self._on_calculation_thread_finished, Qt.QueuedConnection)
@@ -1677,6 +1679,10 @@ class MainWindowWorkflowMixin:
             self.statusBar().showMessage(message)
 
         def _on_calculation_completed(self, payload: dict):
+            self._calculation_timeout_timer.stop()
+            if self._calculation_timed_out:
+                self.runtime_logger.warning("Discarded calculation payload arriving after timeout")
+                return
             self.roi_detections = payload.get("detections", {})
             self.roi_detection_failures = payload.get("roi_failures", {"Mark1": [], "Mark2": []})
             self.detections = {}

@@ -167,6 +167,7 @@ def detect_caliper_circle(
     gray: np.ndarray, roi: Roi, params: DetectionParams, *,
     diagnostics: list[dict] | None = None,
     sampling_transform: np.ndarray | None = None,
+    pixel_scale: tuple[float, float] | None = None,
     cancelled=None,
 ) -> CaliperCircleResult:
     """Extract and fit using the production algorithm.
@@ -328,23 +329,45 @@ def detect_caliper_circle(
         windows[int(candidate["window_index"])]["accepted"] = True
         windows[int(candidate["window_index"])]["selected_radius"] = candidate["roi_radius"]
 
+    sx, sy = (1.0, 1.0)
+    if pixel_scale is not None:
+        sx = float(pixel_scale[0]) if pixel_scale[0] > 0 else 1.0
+        sy = float(pixel_scale[1]) if pixel_scale[1] > 0 else 1.0
+    anisotropic = not np.isclose(sx, sy, rtol=1e-6, atol=1e-9)
+    mean_scale = float(np.sqrt(sx * sy)) if anisotropic else 1.0
+    fit_points = np.column_stack((points[:, 0] * sx, points[:, 1] * sy)) if anisotropic else points
+    threshold = float(params.residual_limit_px) * mean_scale if anisotropic else float(params.residual_limit_px)
+
     fit_trace = {} if diagnostics is not None else None
     ransac_used = bool(params.use_ransac and len(points) >= 6)
     if ransac_used:
-        fit_cx, fit_cy, radius, residual, mask = fit_circle_ransac(
-            points,
-            params.residual_limit_px,
+        fit_cx_s, fit_cy_s, radius_s, residual_s, mask = fit_circle_ransac(
+            fit_points,
+            threshold,
             iterations=400,
             cancelled=cancelled,
             diagnostics=fit_trace,
         )
     else:
-        initial_cx, initial_cy, initial_radius, _ = fit_circle_least_squares(points)
-        fit_cx, fit_cy, radius, residual = fit_circle_geometric_robust(
-            points,
+        initial_cx, initial_cy, initial_radius, _ = fit_circle_least_squares(fit_points)
+        fit_cx_s, fit_cy_s, radius_s, residual_s = fit_circle_geometric_robust(
+            fit_points,
             (initial_cx, initial_cy, initial_radius),
         )
         mask = np.ones(len(points), dtype=bool)
+
+    if anisotropic:
+        fit_cx = float(fit_cx_s / sx)
+        fit_cy = float(fit_cy_s / sy)
+        radius = float(radius_s / mean_scale)
+        residual = float(residual_s / mean_scale)
+        if fit_trace is not None:
+            if fit_trace.get("threshold_px") is not None:
+                fit_trace["threshold_px"] = float(fit_trace["threshold_px"]) / mean_scale
+            if fit_trace.get("errors_px") is not None:
+                fit_trace["errors_px"] = np.asarray(fit_trace["errors_px"], dtype=np.float64) / mean_scale
+    else:
+        fit_cx, fit_cy, radius, residual = float(fit_cx_s), float(fit_cy_s), float(radius_s), float(residual_s)
 
     inlier_count = int(np.sum(mask))
     if diagnostics is not None:
@@ -361,7 +384,8 @@ def detect_caliper_circle(
             record["fit_error_px"] = float(errors[point_index]) if errors is not None else None
     inlier_points = points[mask]
     stats = circle_diameter_statistics(inlier_points, fit_cx, fit_cy)
-    radius = stats["average_radius_px"] or radius
+    if not anisotropic:
+        radius = stats["average_radius_px"] or radius
     angular_coverage, maximum_gap_deg = _angular_statistics(inlier_points, fit_cx, fit_cy, count)
     confidence = float(
         np.clip(

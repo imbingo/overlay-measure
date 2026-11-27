@@ -28,10 +28,17 @@ def _point(value: Iterable[float]) -> Point:
     return float(x), float(y)
 
 
-def _circle_from_three_points(points: list[Point]) -> tuple[Point, float]:
+def _circle_from_three_points(
+    points: list[Point],
+    config: Optional[MeasurementConfig] = None,
+) -> tuple[Point, float, Optional[float]]:
     if len(points) != 3:
         raise ValueError("三点定圆需要恰好 3 个点")
-    p1, p2, p3 = np.asarray(points, dtype=np.float64)
+    sx = float(config.pixel_size_x_um) if config is not None and config.pixel_size_x_um > 0 else 1.0
+    sy = float(config.pixel_size_y_um) if config is not None and config.pixel_size_y_um > 0 else 1.0
+    pts = np.asarray(points, dtype=np.float64)
+    scaled = np.column_stack((pts[:, 0] * sx, pts[:, 1] * sy))
+    p1, p2, p3 = scaled
     matrix = np.array(
         [[2.0 * (p2[0] - p1[0]), 2.0 * (p2[1] - p1[1])],
          [2.0 * (p3[0] - p1[0]), 2.0 * (p3[1] - p1[1])]],
@@ -41,11 +48,16 @@ def _circle_from_three_points(points: list[Point]) -> tuple[Point, float]:
         [np.dot(p2, p2) - np.dot(p1, p1), np.dot(p3, p3) - np.dot(p1, p1)],
         dtype=np.float64,
     )
-    if abs(float(np.linalg.det(matrix))) < 1e-10:
+    if abs(float(np.linalg.det(matrix))) < 1e-12:
         raise ValueError("三个点接近共线，无法建立圆")
-    center = np.linalg.solve(matrix, rhs)
-    radius = float(np.linalg.norm(center - p1))
-    return (float(center[0]), float(center[1])), radius
+    center_scaled = np.linalg.solve(matrix, rhs)
+    radius_um = float(np.linalg.norm(center_scaled - p1))
+    center_px = (float(center_scaled[0] / sx), float(center_scaled[1] / sy))
+    if config is not None:
+        mean_scale = mean_pixel_size_um(config)
+        radius_px = radius_um / mean_scale if mean_scale > 0 else radius_um
+        return center_px, float(radius_px), radius_um
+    return center_px, radius_um, None
 
 
 def cross2d(a, b):
@@ -70,16 +82,23 @@ def _line_intersection(a: list[Point], b: list[Point]) -> Point:
     return float(result[0]), float(result[1])
 
 
-def _project_point(point: Point, line: list[Point]) -> Point:
+def _project_point(
+    point: Point,
+    line: list[Point],
+    config: Optional[MeasurementConfig] = None,
+) -> Point:
     if len(line) < 2:
         raise ValueError("投影点需要一条有效直线")
-    p = np.asarray(point, dtype=np.float64)
-    a = np.asarray(line[0], dtype=np.float64)
-    direction = np.asarray(line[1], dtype=np.float64) - a
+    sx = float(config.pixel_size_x_um) if config is not None and config.pixel_size_x_um > 0 else 1.0
+    sy = float(config.pixel_size_y_um) if config is not None and config.pixel_size_y_um > 0 else 1.0
+    scale = np.array([sx, sy], dtype=np.float64)
+    p = np.asarray(point, dtype=np.float64) * scale
+    a = np.asarray(line[0], dtype=np.float64) * scale
+    direction = np.asarray(line[1], dtype=np.float64) * scale - a
     denominator = float(np.dot(direction, direction))
     if denominator < 1e-12:
         raise ValueError("直线长度为零")
-    projected = a + float(np.dot(p - a, direction) / denominator) * direction
+    projected = (a + float(np.dot(p - a, direction) / denominator) * direction) / scale
     return float(projected[0]), float(projected[1])
 
 
@@ -170,8 +189,10 @@ def _resolve_feature(
         center = tuple(np.mean(np.asarray(points), axis=0))
         return GeometryFeatureResult(definition.feature_id, definition.name, definition.layer, "line", "Valid", _point(center), points, algorithm_path="两点定直线")
     if definition.feature_type == "circle":
-        center, radius = _circle_from_three_points([_point(value) for value in definition.points_px])
-        return GeometryFeatureResult(definition.feature_id, definition.name, definition.layer, "circle", "Valid", center, list(definition.points_px), radius, 0.0, algorithm_path="三点定圆")
+        center, radius, radius_um = _circle_from_three_points([_point(value) for value in definition.points_px], config)
+        result = GeometryFeatureResult(definition.feature_id, definition.name, definition.layer, "circle", "Valid", center, list(definition.points_px), radius, 0.0, algorithm_path="三点定圆")
+        result.radius_um = radius_um
+        return result
 
     references = [resolved[item] for item in definition.reference_ids]
     if definition.feature_type == "intersection":
@@ -182,7 +203,7 @@ def _resolve_feature(
         center = ((first[0] + second[0]) / 2.0, (first[1] + second[1]) / 2.0)
         path = "两要素中心中点"
     elif definition.feature_type == "projection":
-        center = _project_point(_feature_anchor(references[0]), _feature_line(references[1]))
+        center = _project_point(_feature_anchor(references[0]), _feature_line(references[1]), config)
         path = "点到直线垂足"
     else:
         raise ValueError(f"未知要素类型：{definition.feature_type}")

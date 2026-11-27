@@ -86,6 +86,10 @@ def load_image(path: str) -> ImageData:
     else:
         arr = _load_raster_image_unicode_safe(str(p))
         if arr.ndim == 3:
+            # cv2.cvtColor supports uint8, uint16, and float32; convert other
+            # numeric dtypes (e.g. int16/int32/float64 TIFF) to float32 first.
+            if arr.dtype not in (np.uint8, np.uint16, np.float32):
+                arr = arr.astype(np.float32)
             # cv2 decodes as BGR/BGRA. Convert to grayscale.
             if arr.shape[2] == 4:
                 arr = cv2.cvtColor(arr, cv2.COLOR_BGRA2GRAY)
@@ -95,6 +99,8 @@ def load_image(path: str) -> ImageData:
                 raise ValueError(f"不支持的图像通道数：{arr.shape[2]}")
 
     arr = np.asarray(arr)
+    if not np.issubdtype(arr.dtype, np.number) and not np.issubdtype(arr.dtype, np.bool_):
+        raise ValueError(f"不支持的非数值数据类型：{arr.dtype}")
     source_dtype = str(arr.dtype)
     source_finite = arr[np.isfinite(arr)] if np.issubdtype(arr.dtype, np.number) else np.asarray([], dtype=float)
     source_min = float(np.min(source_finite)) if source_finite.size else 0.0
@@ -146,12 +152,12 @@ def display_to_uint8(image: ImageData, enhanced: bool = False) -> np.ndarray:
         lo, hi = float(info.min), float(info.max)
     else:
         lo, hi = float(image.source_min), float(image.source_max)
-        if lo >= 0.0 and hi <= 1.0:
-            lo, hi = 0.0, 1.0
-        elif lo >= 0.0 and hi <= 255.0:
-            lo, hi = 0.0, 255.0
-        elif hi <= lo:
+        if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
             lo, hi = float(np.min(finite)), float(np.max(finite))
+        elif lo >= 0.0 and 0.1 < hi <= 1.0:
+            lo, hi = 0.0, 1.0
+        elif lo >= 0.0 and 16.0 < hi <= 255.0:
+            lo, hi = 0.0, 255.0
     if hi <= lo:
         return np.zeros_like(gray, dtype=np.uint8)
     out = np.clip((gray - lo) / (hi - lo), 0.0, 1.0)

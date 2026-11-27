@@ -47,6 +47,8 @@ def refine_contour_edges(
     contour_points_xy: np.ndarray,
     params: DetectionParams,
     max_points: int = 1200,
+    precomputed: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]] = None,
+    origin_xy: Tuple[float, float] = (0.0, 0.0),
 ) -> tuple[np.ndarray, np.ndarray]:
     """Refine one selected closed contour to subpixel gradient-peak positions."""
     points = np.asarray(contour_points_xy, dtype=np.float64).reshape(-1, 2)
@@ -54,30 +56,37 @@ def refine_contour_edges(
         return np.empty((0, 2), dtype=np.float64), np.empty((0,), dtype=np.float64)
     stride = max(1, len(points) // max(3, int(max_points)))
     points = points[::stride]
-    image = np.asarray(gray, dtype=np.float32)
-    sigma = max(0.0, float(params.gaussian_sigma_px))
-    blurred = cv2.GaussianBlur(image, (0, 0), sigmaX=sigma, sigmaY=sigma) if sigma > 0 else image
-    gx = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3)
+    if precomputed is None:
+        image = np.asarray(gray, dtype=np.float32)
+        sigma = max(0.0, float(params.gaussian_sigma_px))
+        blurred = cv2.GaussianBlur(image, (0, 0), sigmaX=sigma, sigmaY=sigma) if sigma > 0 else image
+        gx = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3)
+    else:
+        blurred, gx, gy = precomputed
+    ox, oy = float(origin_xy[0]), float(origin_xy[1])
     height, width = blurred.shape[:2]
     half_width = max(1.0, float(params.profile_half_width_px))
     step = max(0.05, float(params.profile_step_px))
     offsets = np.arange(-half_width, half_width + step * 0.5, step, dtype=np.float32)
     if len(offsets) < 5:
         offsets = np.linspace(-half_width, half_width, 9, dtype=np.float32)
+        step = float(offsets[1] - offsets[0])
 
     refined = []
     gradients = []
     for x, y in points:
-        ix = int(np.clip(round(x), 0, width - 1))
-        iy = int(np.clip(round(y), 0, height - 1))
+        lx = float(x) - ox
+        ly = float(y) - oy
+        ix = int(np.clip(round(lx), 0, width - 1))
+        iy = int(np.clip(round(ly), 0, height - 1))
         magnitude = float(np.hypot(gx[iy, ix], gy[iy, ix]))
         if magnitude < float(params.min_gradient):
             continue
         nx = float(gx[iy, ix]) / max(magnitude, 1e-12)
         ny = float(gy[iy, ix]) / max(magnitude, 1e-12)
         samples = np.asarray(
-            [_bilinear_sample(blurred, float(x + offset * nx), float(y + offset * ny)) for offset in offsets],
+            [_bilinear_sample(blurred, float(lx + offset * nx), float(ly + offset * ny)) for offset in offsets],
             dtype=np.float32,
         )
         if not np.isfinite(samples).all():
@@ -142,6 +151,7 @@ def detect_subpixel_edges(
     offsets = np.arange(-half, half + 0.5 * step, step, dtype=np.float32)
     if len(offsets) < 5:
         offsets = np.linspace(-half, half, 9, dtype=np.float32)
+        step = float(offsets[1] - offsets[0])
 
     for point_index, (xi, yi) in enumerate(zip(xs, ys)):
         if point_index % 128 == 0 and cancelled and cancelled():

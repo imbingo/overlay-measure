@@ -134,8 +134,16 @@ jobs:
           test -f "release_notes_$TAG.md"
           test -f "release/SOMA_Vision_Metrology_V${VERSION}_Setup.exe"
           (cd release && sha256sum --check "SOMA_Vision_Metrology_V${VERSION}_Setup.exe.sha256")
-          gh release create "$TAG" release/* \
-            --target "$GITHUB_SHA" \
-            --title "SOMA Vision Metrology V$VERSION" \
-            --notes-file "release_notes_$TAG.md" \
-            --latest
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+            gh release edit "$TAG" \
+              --title "SOMA Vision Metrology V$VERSION" \
+              --notes-file "release_notes_$TAG.md" \
+              --latest
+          else
+            gh release create "$TAG" release/* \
+              --target "$GITHUB_SHA" \
+              --title "SOMA Vision Metrology V$VERSION" \
+              --notes-file "release_notes_$TAG.md" \
+              --latest
+          fi

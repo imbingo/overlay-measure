@@ -136,7 +136,6 @@ class RecipeQuickMenu(QMenu):
         action.setDefaultWidget(host)
         self.addAction(action)
         self.search_edit.textChanged.connect(self._populate)
-        self.tree.itemDoubleClicked.connect(self._activate_item)
         self.tree.itemActivated.connect(self._activate_item)
         self.import_btn.clicked.connect(self._request_import)
         self.manager_btn.clicked.connect(self._request_manager)

@@ -130,11 +130,11 @@ def test_batch_result_deletion_removes_whole_run_and_recomputes(monkeypatch):
     app.processEvents()
 
 
-def test_production_mode_blocks_result_deletion(monkeypatch):
+def test_default_mode_allows_result_deletion_after_confirm(monkeypatch):
     app = _app()
     window = MainWindow()
     window.overlays["Mark1"] = _overlay("Mark1", 1.0)
-    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: QMessageBox.Ok)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: QMessageBox.No)
 
     window._delete_result_rows([{"kind": "overlay", "mark_id": "Mark1", "workflow": "Manual"}])
 

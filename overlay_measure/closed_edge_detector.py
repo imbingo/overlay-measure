@@ -9,16 +9,21 @@ from .subpixel_edge_detector import SubpixelEdges, refine_contour_edges
 
 
 def closed_round_edges(gray, roi, params, *, require_nested=False):
+    roi = roi.normalized()
     x0, y0, x1, y1 = roi.to_int_bounds(gray.shape)
     crop = np.asarray(gray[y0:y1, x0:x1], dtype=np.float32)
     if crop.size < 25:
         return None
     sigma = max(0.0, float(params.gaussian_sigma_px))
     blurred = cv2.GaussianBlur(crop, (0, 0), sigma) if sigma else crop
+    gx = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3)
+    precomputed = (blurred, gx, gy)
     edges = cv2.Canny(normalize_to_uint8(blurred), params.canny_low,
                      params.canny_high, L2gradient=True)
     contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
     candidates = []
+    roi_span = max(float(roi.w), float(roi.h), 1e-6)
     for contour in contours:
         if len(contour) < max(12, params.min_edge_points):
             continue
@@ -37,18 +42,27 @@ def closed_round_edges(gray, roi, params, *, require_nested=False):
                 or local[:, 0].max() >= crop.shape[1] - 2
                 or local[:, 1].max() >= crop.shape[0] - 2):
             continue
-        (cx, cy), (a, b), _ = cv2.fitEllipse(contour)
-        if min(a, b) <= 0 or max(a, b) / min(a, b) > 4:
+        try:
+            (cx, cy), (a, b), _ = cv2.fitEllipse(contour)
+        except cv2.error:
+            continue
+        if not np.isfinite([cx, cy, a, b]).all() or min(a, b) <= 0 or max(a, b) / min(a, b) > 4:
             continue
         if abs(area / (np.pi * a * b / 4) - 1) > 0.15:
             continue
-        refined, gradients = refine_contour_edges(gray, points, params)
+        refined, gradients = refine_contour_edges(
+            gray,
+            points,
+            params,
+            precomputed=precomputed,
+            origin_xy=(float(x0), float(y0)),
+        )
         if len(refined) < params.min_edge_points or len(refined) < 0.75 * min(len(points), 1200):
             continue
         if not roi.contains_points(refined).all():
             continue
         center = np.array([cx + x0, cy + y0])
-        center_distance = np.linalg.norm(center - roi.center()) / max(roi.w, roi.h)
+        center_distance = np.linalg.norm(center - roi.center()) / roi_span
         score = float(np.median(gradients)) / (1 + 4 * center_distance)
         candidates.append((score, area, center, refined, gradients))
     if not candidates:

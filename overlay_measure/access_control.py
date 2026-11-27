@@ -29,32 +29,43 @@ class AccessController:
             self.set_password(DEFAULT_ENGINEERING_PASSWORD)
 
     @staticmethod
-    def _digest(password: str, salt: bytes) -> str:
-        return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000).hex()
+    def _digest(password: str, salt: bytes, iterations: int = 200_000) -> str:
+        return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, int(iterations)).hex()
 
     def set_password(self, password: str) -> None:
         if len(password) < 6:
             raise ValueError("工程模式密码至少需要 6 个字符")
+        import tempfile
         salt = os.urandom(16)
+        iterations = 200_000
         data = {
             "salt": salt.hex(),
-            "digest": self._digest(password, salt),
-            "iterations": 200_000,
+            "digest": self._digest(password, salt, iterations),
+            "iterations": iterations,
             "default_password": password == DEFAULT_ENGINEERING_PASSWORD,
             "warning_acknowledged": False,
         }
-        temporary = self.settings_path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        temporary.replace(self.settings_path)
+        fd, tmp_name = tempfile.mkstemp(prefix=".security_", suffix=".tmp", dir=str(self.settings_dir))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps(data, indent=2))
+            os.replace(tmp_name, self.settings_path)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     def verify(self, password: str) -> bool:
         try:
             data = json.loads(self.settings_path.read_text(encoding="utf-8"))
             salt = bytes.fromhex(data["salt"])
             expected = str(data["digest"])
+            iterations = int(data.get("iterations", 200_000))
         except (OSError, ValueError, KeyError, TypeError):
             return False
-        return hmac.compare_digest(self._digest(password, salt), expected)
+        return hmac.compare_digest(self._digest(password, salt, iterations), expected)
 
     def should_warn_default_password(self) -> bool:
         try:

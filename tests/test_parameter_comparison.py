@@ -213,12 +213,6 @@ def test_escape_or_reject_stops_preview_thread(main):
 
 def test_entry_permission_and_main_close_stop_dialog(main, monkeypatch):
     app, window, _ = main
-    messages = []
-    monkeypatch.setattr(QMessageBox, "information", lambda *args: messages.append(args[2]))
-    window._set_operation_mode("Production")
-    window.start_parameter_comparison()
-    assert messages and getattr(window, "_parameter_comparison_dialog", None) is None
-    window._set_operation_mode("Engineering", authenticated=True)
     assert window.parameter_comparison_action.isEnabled()
     window.start_parameter_comparison()
     dialog = window._parameter_comparison_dialog

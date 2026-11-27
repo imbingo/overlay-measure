@@ -65,9 +65,27 @@ def create_measurement_archive(
             for mark_id, records in batch_records.items()
         },
     }
-    (directory / "measurement.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    def _json_safe(obj):
+        if isinstance(obj, float):
+            import math
+            return obj if math.isfinite(obj) else None
+        if hasattr(obj, "tolist") and callable(obj.tolist) and not isinstance(obj, (bytes, str)):
+            return _json_safe(obj.tolist())
+        if isinstance(obj, dict):
+            return {k: _json_safe(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_json_safe(v) for v in obj]
+        if hasattr(obj, "item") and callable(obj.item):
+            return _json_safe(obj.item())
+        return obj
+
+    safe_manifest = _json_safe(manifest)
+    manifest_path = directory / "measurement.json"
+    tmp_path = directory / "measurement.json.tmp"
+    tmp_path.write_text(
+        json.dumps(safe_manifest, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8"
     )
+    tmp_path.replace(manifest_path)
     index_path = app_data_root() / "records" / "measurement_index.jsonl"
     with index_path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps({

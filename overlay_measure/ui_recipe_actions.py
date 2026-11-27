@@ -67,9 +67,9 @@ from .quality_profiles import (
     quality_profile_is_modified,
 )
 from .geometry_models import GeometryRunResult
-from .recipe_manager import load_recipe, load_recipe_with_geometry, save_recipe
+from .recipe_manager import load_recipe, load_recipe_with_geometry, load_recipe_with_geometry_bytes, save_recipe
 from .recipe_library import RecipeLibrary, RecipeLibraryEntry
-from .recipe_integrity import seal_recipe, verify_recipe
+from .recipe_integrity import seal_recipe, verify_and_read_recipe_bytes, verify_recipe
 from .result_exporter import build_detection_rows, export_results
 from .rz_calculator import build_summary_rows
 from .runtime_support import RecoveryStore, build_runtime_logger
@@ -127,7 +127,7 @@ class MainWindowRecipeMixin:
             show_message: bool = True,
         ) -> bool:
             try:
-                integrity_status, recipe_hash = verify_recipe(path)
+                integrity_status, recipe_hash, raw_bytes = verify_and_read_recipe_bytes(path)
             except Exception as exc:
                 QMessageBox.critical(self, "配方校验失败", str(exc))
                 return False
@@ -143,7 +143,7 @@ class MainWindowRecipeMixin:
             if confirm_switch and not self._confirm_recipe_switch(path):
                 return False
             try:
-                config, params, marks, geometry_program = load_recipe_with_geometry(path)
+                config, params, marks, geometry_program = load_recipe_with_geometry_bytes(raw_bytes)
                 self.config = config
                 if not getattr(self.config, "recipe_name", "").strip():
                     self.config.recipe_name = Path(path).stem
@@ -253,6 +253,9 @@ class MainWindowRecipeMixin:
             if not path:
                 return
             try:
+                integrity_status, _ = verify_recipe(path)
+                if integrity_status == "Mismatch":
+                    raise ValueError("配方内容与已保存的 SHA-256 哈希不一致，已阻止导入。")
                 load_recipe(path)
             except Exception as exc:
                 QMessageBox.critical(self, "配方无效", str(exc))

@@ -78,16 +78,23 @@ class Roi:
     def to_int_bounds(self, shape: Tuple[int, int]) -> Tuple[int, int, int, int]:
         roi = self.normalized()
         height, width = shape[:2]
-        if roi.roi_type == "Approximate Line":
+        if roi.roi_type in {"Approximate Line", "Ellipse", "Rectangular Ring"} and abs(roi.angle_deg % 180.0) > 1e-6:
             cx, cy = roi.center()
             theta = np.deg2rad(roi.angle_deg)
             cosine, sine = np.cos(theta), np.sin(theta)
-            corners = []
-            for lx, ly in ((-roi.w / 2, -roi.h / 2), (roi.w / 2, -roi.h / 2),
-                           (roi.w / 2, roi.h / 2), (-roi.w / 2, roi.h / 2)):
-                corners.append((cx + cosine * lx - sine * ly, cy + sine * lx + cosine * ly))
-            xs, ys = zip(*corners)
-            left, top, right, bottom = min(xs), min(ys), max(xs), max(ys)
+            if roi.roi_type == "Ellipse":
+                half_w = roi.w / 2.0
+                half_h = roi.h / 2.0
+                span_x = float(np.hypot(half_w * cosine, half_h * sine))
+                span_y = float(np.hypot(half_w * sine, half_h * cosine))
+                left, top, right, bottom = cx - span_x, cy - span_y, cx + span_x, cy + span_y
+            else:
+                corners = []
+                for lx, ly in ((-roi.w / 2, -roi.h / 2), (roi.w / 2, -roi.h / 2),
+                               (roi.w / 2, roi.h / 2), (-roi.w / 2, roi.h / 2)):
+                    corners.append((cx + cosine * lx - sine * ly, cy + sine * lx + cosine * ly))
+                xs, ys = zip(*corners)
+                left, top, right, bottom = min(xs), min(ys), max(xs), max(ys)
         else:
             left, top, right, bottom = roi.x, roi.y, roi.x + roi.w, roi.y + roi.h
         x0 = max(0, min(width - 1, int(np.floor(left))))
@@ -234,7 +241,7 @@ class MeasurementConfig:
     rx_angle_urad: float = 0.0
     ry_angle_urad: float = 0.0
     material_thickness_mm: float = 0.0
-    overlay_definition: str = "upper_minus_lower"
+    overlay_definition: str = "lower_minus_upper"
     delta_x_limit_um: float = 0.5
     delta_y_limit_um: float = 0.5
     overlay_r_limit_um: float = 0.7

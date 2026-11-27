@@ -144,19 +144,33 @@ def contour_ellipse_metrics_um(points_xy, config: MeasurementConfig) -> dict:
     }
 
 
-def ellipse_major_axis_angle_deg(shape_params: dict, config: MeasurementConfig) -> float | None:
-    """Physical major-axis orientation of the existing pixel ellipse model."""
+def _physical_ellipse_eigen(shape_params: dict, config: MeasurementConfig):
+    """Return (eigenvalues, eigenvectors) of the calibrated ellipse quadratic form."""
     if "major_px" not in shape_params or "minor_px" not in shape_params:
         return None
+    major_px = float(shape_params["major_px"])
+    minor_px = float(shape_params["minor_px"])
+    if not (np.isfinite(major_px) and np.isfinite(minor_px)) or major_px <= 0 or minor_px <= 0:
+        return None
     theta = np.deg2rad(float(shape_params.get("angle_deg", 0.0)))
-    rotation = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
-    transform = np.diag([config.pixel_size_x_um, config.pixel_size_y_um]) @ rotation
-    model = transform @ np.diag([float(shape_params["major_px"]) ** 2,
-                                 float(shape_params["minor_px"]) ** 2]) @ transform.T
+    rotation = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]], dtype=np.float64)
+    transform = np.diag([float(config.pixel_size_x_um), float(config.pixel_size_y_um)]) @ rotation
+    model = transform @ np.diag([major_px ** 2, minor_px ** 2]) @ transform.T
     if not np.isfinite(model).all():
         return None
     values, vectors = np.linalg.eigh(model)
-    if values[0] <= 0 or np.isclose(values[0], values[1], rtol=1e-5, atol=1e-8):
+    if values[0] <= 0 or not np.isfinite(values).all():
+        return None
+    return values, vectors
+
+
+def ellipse_major_axis_angle_deg(shape_params: dict, config: MeasurementConfig) -> float | None:
+    """Physical major-axis orientation of the existing pixel ellipse model."""
+    eigen = _physical_ellipse_eigen(shape_params, config)
+    if eigen is None:
+        return None
+    values, vectors = eigen
+    if np.isclose(values[0], values[1], rtol=1e-5, atol=1e-8):
         return None
     direction = vectors[:, -1]
     return normalize_axis_angle_deg(float(np.rad2deg(np.arctan2(direction[1], direction[0]))))
@@ -250,19 +264,24 @@ def rotated_rect_size_um(
 
 
 def ellipse_metrics_um(shape_params: dict, config: MeasurementConfig) -> dict[str, float]:
-    """Return calibrated ellipse axes and derived metrology values.
+    """Return calibrated ellipse principal axes and derived metrology values.
 
-    OpenCV reports full axis lengths in pixel coordinates.  With anisotropic
-    pixels each axis must be calibrated along its own fitted direction before
-    the physical major/minor ordering is applied.
+    Transforms the pixel ellipse quadratic form by diag(sx, sy) and solves its
+    eigenvalues so physical major/minor axes remain exact under anisotropic pixels.
     """
     if "major_px" not in shape_params or "minor_px" not in shape_params:
         return {}
-    angle_deg = float(shape_params.get("angle_deg", 0.0))
-    first_axis_um = float(shape_params["major_px"]) * axis_scale_um_per_px(config, angle_deg)
-    second_axis_um = float(shape_params["minor_px"]) * axis_scale_um_per_px(config, angle_deg + 90.0)
-    major_um = max(first_axis_um, second_axis_um)
-    minor_um = min(first_axis_um, second_axis_um)
+    eigen = _physical_ellipse_eigen(shape_params, config)
+    if eigen is not None:
+        values, _ = eigen
+        minor_um = float(np.sqrt(max(values[0], 0.0)))
+        major_um = float(np.sqrt(max(values[1], 0.0)))
+    else:
+        angle_deg = float(shape_params.get("angle_deg", 0.0))
+        first_axis_um = float(shape_params["major_px"]) * axis_scale_um_per_px(config, angle_deg)
+        second_axis_um = float(shape_params["minor_px"]) * axis_scale_um_per_px(config, angle_deg + 90.0)
+        major_um = max(first_axis_um, second_axis_um)
+        minor_um = min(first_axis_um, second_axis_um)
     return {
         "ellipse_major_um": major_um,
         "ellipse_minor_um": minor_um,

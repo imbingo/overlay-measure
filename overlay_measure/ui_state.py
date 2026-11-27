@@ -92,26 +92,11 @@ from .ui_workers import MeasurementWorker
 
 class MainWindowStateMixin:
         def on_operation_mode_changed(self):
-            requested = self.operation_mode_combo.currentData() or "Production"
-            if requested == self.operation_mode:
-                return
-            if requested == "Engineering":
-                password, accepted = QInputDialog.getText(
-                    self,
-                    "进入工程模式",
-                    "请输入工程模式密码：",
-                    QLineEdit.Password,
-                )
-                if not accepted or not self.access_controller.verify(password):
-                    self.operation_mode_combo.blockSignals(True)
-                    self._set_combo_value(self.operation_mode_combo, "Production")
-                    self.operation_mode_combo.blockSignals(False)
-                    self.runtime_logger.warning("Engineering mode authentication failed")
-                    if accepted:
-                        QMessageBox.warning(self, "密码错误", "工程模式密码不正确。")
-                    return
-            self.operation_mode = requested
-            self.runtime_logger.info("Operation mode changed to %s", requested)
+            # Production mode is retired; always remain in full Engineering mode.
+            self.operation_mode = "Engineering"
+            self.operation_mode_combo.blockSignals(True)
+            self._set_combo_value(self.operation_mode_combo, "Engineering")
+            self.operation_mode_combo.blockSignals(False)
             self._apply_operation_mode()
 
         def change_engineering_password(self):
@@ -148,48 +133,51 @@ class MainWindowStateMixin:
             QMessageBox.information(self, "修改完成", "工程模式密码已更新。")
 
         def _set_operation_mode(self, mode: str, *, authenticated: bool = False):
-            if mode == "Engineering" and not authenticated:
-                raise PermissionError("切换工程模式需要身份验证")
-            self.operation_mode = mode
+            # Production mode is retired; keep full-access Engineering mode active.
+            self.operation_mode = "Engineering"
             self.operation_mode_combo.blockSignals(True)
-            self._set_combo_value(self.operation_mode_combo, mode)
+            self._set_combo_value(self.operation_mode_combo, "Engineering")
             self.operation_mode_combo.blockSignals(False)
             self._apply_operation_mode()
 
         def _apply_operation_mode(self):
             if not hasattr(self, "side_tabs"):
                 return
-            engineering = self.operation_mode == "Engineering"
-            self.more_actions_btn.setVisible(engineering)
-            self.soma_diagnostics_btn.setVisible(engineering)
-            self.soma_diagnostics_btn.setEnabled(engineering and not self._calculation_running)
+            self.operation_mode = "Engineering"
+            engineering = True
+            self.operation_mode_combo.setVisible(False)
+            self.more_actions_btn.setVisible(True)
+            self.soma_diagnostics_btn.setVisible(True)
+            self.soma_diagnostics_btn.setEnabled(not self._calculation_running)
             self.image_mode_label.setVisible(True)
             self.mode_combo.setVisible(True)
+            self.mode_combo.setEnabled(not self._calculation_running)
             self.display_enhance_check.setVisible(True)
             self.analyze_roi_btn.setVisible(True)
             self.import_upper_btn.setVisible(True)
             self.import_lower_btn.setVisible(True)
             self.reset_measurement_btn.setVisible(True)
-            self.side_tabs.setTabEnabled(2, engineering)
-            self.side_tabs.setTabEnabled(3, engineering)
-            self.side_tabs.setTabEnabled(4, engineering)
+            self.side_tabs.setTabEnabled(2, True)
+            self.side_tabs.setTabEnabled(3, True)
+            self.side_tabs.setTabEnabled(4, True)
             self.upper_canvas.image_drop_enabled = not self._calculation_running
             self.lower_canvas.image_drop_enabled = not self._calculation_running
             if self.recipe_quick_menu is not None:
-                self.recipe_quick_menu.set_engineering_access(engineering and not self._calculation_running)
+                self.recipe_quick_menu.set_engineering_access(not self._calculation_running)
             if hasattr(self, "image_diagnostics_action"):
-                self.image_diagnostics_action.setEnabled(engineering and not self._calculation_running)
+                self.image_diagnostics_action.setEnabled(not self._calculation_running)
             if hasattr(self, "soma_diagnostics_action"):
-                self.soma_diagnostics_action.setEnabled(engineering and not self._calculation_running)
+                self.soma_diagnostics_action.setEnabled(not self._calculation_running)
             if hasattr(self, "parameter_comparison_action"):
-                self.parameter_comparison_action.setEnabled(engineering and not self._calculation_running)
+                self.parameter_comparison_action.setEnabled(not self._calculation_running)
             self.analyze_roi_btn.setEnabled(
                 not self._calculation_running and not self._is_auto_workflow()
             )
-            self.diagnostic_check.setEnabled(engineering)
+            self.diagnostic_check.setEnabled(True)
             if hasattr(self, "image_diagnostics_btn"):
-                self.image_diagnostics_btn.setEnabled(engineering and not self._calculation_running)
-            self.change_engineering_password_btn.setEnabled(engineering and not self._calculation_running)
+                self.image_diagnostics_btn.setEnabled(not self._calculation_running)
+            self.change_engineering_password_btn.setVisible(False)
+            self.change_engineering_password_btn.setEnabled(False)
             for widget in (
                 self.material_code_edit,
                 self.recipe_name_edit,
@@ -199,22 +187,11 @@ class MainWindowStateMixin:
                 self.equipment_model_edit,
                 self.calibration_date_edit,
             ):
-                widget.setEnabled(engineering)
-            if not engineering and self.side_tabs.currentIndex() in {2, 3, 4}:
-                self.side_tabs.setCurrentIndex(1)
-            color = "#2468B2" if engineering else "#248A3D"
-            background = "#EAF3FD" if engineering else "#F1F7F3"
-            self.operation_mode_combo.setStyleSheet(
-                f"color: {color}; background: {background}; font-weight: 600;"
-            )
-            self.operation_mode_combo.setToolTip(
-                "工程模式：允许修改 ROI、算法参数和配方。" if engineering
-                else "生产模式：配方与算法参数已锁定。切换工程模式需要密码。"
-            )
+                widget.setEnabled(True)
             for table_name in ("det_table", "overlay_table", "geometry_table", "repeat_table"):
                 table = getattr(self, table_name, None)
                 if table is not None and hasattr(table, "set_delete_allowed"):
-                    table.set_delete_allowed(engineering and not self._calculation_running)
+                    table.set_delete_allowed(not self._calculation_running)
             self._update_toolbar_density()
             self._update_roi_edit_lock()
 
@@ -298,17 +275,26 @@ class MainWindowStateMixin:
             finally:
                 self._restoring_roi_history = False
 
+        def _mark_recipe_dirty(self, reason: str = ""):
+            if getattr(self, "recipe_integrity_status", "") == "Verified":
+                self.recipe_integrity_status = "Modified"
+                self.loaded_recipe_hash = ""
+                if reason:
+                    self._append_log(f"{reason}，已清除原配方签章哈希（需重新保存以重新签章）。")
+
         def undo_roi_change(self):
-            if self.operation_mode != "Engineering" or not self._roi_undo_stack:
+            if self._calculation_running or self.operation_mode != "Engineering" or not self._roi_undo_stack:
                 return
             self._roi_redo_stack.append(self._roi_history_snapshot())
             self._restore_roi_history(self._roi_undo_stack.pop())
+            self._mark_recipe_dirty("ROI 已撤销")
 
         def redo_roi_change(self):
-            if self.operation_mode != "Engineering" or not self._roi_redo_stack:
+            if self._calculation_running or self.operation_mode != "Engineering" or not self._roi_redo_stack:
                 return
             self._roi_undo_stack.append(self._roi_history_snapshot())
             self._restore_roi_history(self._roi_redo_stack.pop())
+            self._mark_recipe_dirty("ROI 已重做")
 
         def invalidate_measurement_state(
             self,
@@ -318,6 +304,7 @@ class MainWindowStateMixin:
             clear_batch_results: bool = True,
         ):
             """Clear every result derived from image, ROI, recipe, units or algorithm state."""
+            self._mark_recipe_dirty(reason)
             self.detections.clear()
             self.roi_detections = {"Mark1": {}, "Mark2": {}}
             self.roi_detection_failures = {"Mark1": [], "Mark2": []}
@@ -455,68 +442,132 @@ class MainWindowStateMixin:
             self.params.auto_refine_roi_type = self._combo_value(self.roi_type_combo)
 
         def _push_config_to_ui(self):
-            self._set_mode_ui(self.config.mode)
-            self._set_combo_value(self.workflow_combo, getattr(self.config, "workflow_mode", "Manual"))
-            self.material_code_edit.setText(getattr(self.config, "material_code", ""))
-            self.recipe_name_edit.setText(getattr(self.config, "recipe_name", ""))
-            self.recipe_version_edit.setText(getattr(self.config, "recipe_version", "1.0"))
-            self._set_combo_value(self.recipe_status_combo, getattr(self.config, "recipe_validation_status", "Draft"))
-            self.process_name_edit.setText(getattr(self.config, "process_name", ""))
-            self.equipment_model_edit.setText(getattr(self.config, "equipment_model", ""))
-            self.calibration_date_edit.setText(getattr(self.config, "calibration_date", ""))
-            self.operator_name_edit.setText(getattr(self.config, "operator_name", ""))
-            self.pixel_x_spin.setValue(self.config.pixel_size_x_um)
-            self.pixel_y_spin.setValue(self.config.pixel_size_y_um)
-            self.offset_x_spin.setValue(self.config.registration_offset_x_um)
-            self.offset_y_spin.setValue(self.config.registration_offset_y_um)
-            self.rx_angle_spin.setValue(getattr(self.config, "rx_angle_urad", 0.0))
-            self.ry_angle_spin.setValue(getattr(self.config, "ry_angle_urad", 0.0))
-            self.material_thickness_spin.setValue(getattr(self.config, "material_thickness_mm", 0.0))
-            self.dx_limit_spin.setValue(self.config.delta_x_limit_um)
-            self.dy_limit_spin.setValue(self.config.delta_y_limit_um)
-            self.r_limit_spin.setValue(self.config.overlay_r_limit_um)
-            self.quality_profile_combo.blockSignals(True)
-            self._set_combo_value(
-                self.quality_profile_combo,
-                getattr(self.config, "quality_profile", "Standard"),
-            )
-            self.quality_profile_combo.blockSignals(False)
-            self._updating_quality_controls = True
-            self.conf_min_spin.setValue(self.config.confidence_min)
-            self.rz_layout_combo.setCurrentText(getattr(self.config, "rz_layout", "Y向前后分布"))
-            self.rz_l_spin.setValue(getattr(self.config, "rz_distance_l_um", 1.0))
-            self.rz_limit_spin.setValue(getattr(self.config, "rz_limit", 999999.0))
-            self.caliper_count_spin.setValue(getattr(self.config, "production_caliper_count", 64))
-            self.caliper_width_spin.setValue(getattr(self.config, "production_caliper_width_px", 8.0))
-            self.production_search_spin.setValue(getattr(self.config, "production_search_half_width_px", 8.0))
-            self.production_coverage_spin.setValue(getattr(self.config, "production_min_coverage", 0.65))
-            self.production_reject_spin.setValue(getattr(self.config, "production_max_rejected_ratio", 0.40))
-            self.production_residual_spin.setValue(getattr(self.config, "production_max_residual_um", 0.30))
-            self.production_deviation_spin.setValue(getattr(self.config, "production_max_radial_deviation_um", 0.60))
-            self._updating_quality_controls = False
-            self._refresh_quality_profile_hint()
-
-            self.sigma_spin.setValue(self.params.gaussian_sigma_px)
-            self.canny_low_spin.setValue(self.params.canny_low)
-            self.canny_high_spin.setValue(self.params.canny_high)
-            self.min_gradient_spin.setValue(self.params.min_gradient)
-            self.profile_half_spin.setValue(self.params.profile_half_width_px)
-            self.profile_step_spin.setValue(self.params.profile_step_px)
-            self._set_combo_value(self.fit_mode_combo, self.params.fitting_mode)
-            self._set_combo_value(self.upper_fit_mode_combo, getattr(self.params, "upper_fitting_mode", self.params.fitting_mode))
-            self._set_combo_value(self.lower_fit_mode_combo, getattr(self.params, "lower_fitting_mode", self.params.fitting_mode))
-            self.ransac_check.setChecked(self.params.use_ransac)
-            self.residual_limit_spin.setValue(self.params.residual_limit_px)
-            self.min_edge_points_spin.setValue(self.params.min_edge_points)
-            self._set_combo_value(self.polarity_combo, self.params.polarity)
-            self.measurement_timeout_spin.setValue(getattr(self.params, "measurement_timeout_s", 180))
-            if hasattr(self, "roi_type_combo"):
-                self._set_combo_value(
-                    self.roi_type_combo,
-                    getattr(self.params, "auto_refine_roi_type", "Caliper Circle"),
+            blocked_widgets = [
+                getattr(self, name, None)
+                for name in (
+                    "mode_combo",
+                    "workflow_combo",
+                    "material_code_edit",
+                    "recipe_name_edit",
+                    "recipe_version_edit",
+                    "recipe_status_combo",
+                    "process_name_edit",
+                    "equipment_model_edit",
+                    "calibration_date_edit",
+                    "operator_name_edit",
+                    "pixel_x_spin",
+                    "pixel_y_spin",
+                    "offset_x_spin",
+                    "offset_y_spin",
+                    "rx_angle_spin",
+                    "ry_angle_spin",
+                    "material_thickness_spin",
+                    "dx_limit_spin",
+                    "dy_limit_spin",
+                    "r_limit_spin",
+                    "quality_profile_combo",
+                    "conf_min_spin",
+                    "rz_layout_combo",
+                    "rz_l_spin",
+                    "rz_limit_spin",
+                    "caliper_count_spin",
+                    "caliper_width_spin",
+                    "production_search_spin",
+                    "production_coverage_spin",
+                    "production_reject_spin",
+                    "production_residual_spin",
+                    "production_deviation_spin",
+                    "sigma_spin",
+                    "canny_low_spin",
+                    "canny_high_spin",
+                    "min_gradient_spin",
+                    "profile_half_spin",
+                    "profile_step_spin",
+                    "fit_mode_combo",
+                    "upper_fit_mode_combo",
+                    "lower_fit_mode_combo",
+                    "ransac_check",
+                    "residual_limit_spin",
+                    "min_edge_points_spin",
+                    "polarity_combo",
+                    "measurement_timeout_spin",
+                    "roi_type_combo",
+                    "auto_reference_combo",
+                    "auto_target_combo",
                 )
-            self._set_combo_value(self.auto_reference_combo, getattr(self.config, "auto_reference_label", ""))
-            self._set_combo_value(self.auto_target_combo, getattr(self.config, "auto_target_label", ""))
+            ]
+            previous_sync = getattr(self, "_syncing_parameter_controls", False)
+            previous_quality = getattr(self, "_updating_quality_controls", False)
+            previous_blocked = []
+            self._syncing_parameter_controls = True
+            self._updating_quality_controls = True
+            for widget in blocked_widgets:
+                if widget is not None:
+                    previous_blocked.append((widget, widget.blockSignals(True)))
+            try:
+                self._set_mode_ui(self.config.mode)
+                self._set_combo_value(self.workflow_combo, getattr(self.config, "workflow_mode", "Manual"))
+                self.material_code_edit.setText(getattr(self.config, "material_code", ""))
+                self.recipe_name_edit.setText(getattr(self.config, "recipe_name", ""))
+                self.recipe_version_edit.setText(getattr(self.config, "recipe_version", "1.0"))
+                self._set_combo_value(self.recipe_status_combo, getattr(self.config, "recipe_validation_status", "Draft"))
+                self.process_name_edit.setText(getattr(self.config, "process_name", ""))
+                self.equipment_model_edit.setText(getattr(self.config, "equipment_model", ""))
+                self.calibration_date_edit.setText(getattr(self.config, "calibration_date", ""))
+                self.operator_name_edit.setText(getattr(self.config, "operator_name", ""))
+                self.pixel_x_spin.setValue(self.config.pixel_size_x_um)
+                self.pixel_y_spin.setValue(self.config.pixel_size_y_um)
+                self.offset_x_spin.setValue(self.config.registration_offset_x_um)
+                self.offset_y_spin.setValue(self.config.registration_offset_y_um)
+                self.rx_angle_spin.setValue(getattr(self.config, "rx_angle_urad", 0.0))
+                self.ry_angle_spin.setValue(getattr(self.config, "ry_angle_urad", 0.0))
+                self.material_thickness_spin.setValue(getattr(self.config, "material_thickness_mm", 0.0))
+                self.dx_limit_spin.setValue(self.config.delta_x_limit_um)
+                self.dy_limit_spin.setValue(self.config.delta_y_limit_um)
+                self.r_limit_spin.setValue(self.config.overlay_r_limit_um)
+                self._set_combo_value(
+                    self.quality_profile_combo,
+                    getattr(self.config, "quality_profile", "Standard"),
+                )
+                self.conf_min_spin.setValue(self.config.confidence_min)
+                self.rz_layout_combo.setCurrentText(getattr(self.config, "rz_layout", "Y向前后分布"))
+                self.rz_l_spin.setValue(getattr(self.config, "rz_distance_l_um", 1.0))
+                self.rz_limit_spin.setValue(getattr(self.config, "rz_limit", 999999.0))
+                self.caliper_count_spin.setValue(getattr(self.config, "production_caliper_count", 64))
+                self.caliper_width_spin.setValue(getattr(self.config, "production_caliper_width_px", 8.0))
+                self.production_search_spin.setValue(getattr(self.config, "production_search_half_width_px", 8.0))
+                self.production_coverage_spin.setValue(getattr(self.config, "production_min_coverage", 0.65))
+                self.production_reject_spin.setValue(getattr(self.config, "production_max_rejected_ratio", 0.40))
+                self.production_residual_spin.setValue(getattr(self.config, "production_max_residual_um", 0.30))
+                self.production_deviation_spin.setValue(getattr(self.config, "production_max_radial_deviation_um", 0.60))
+
+                self.sigma_spin.setValue(self.params.gaussian_sigma_px)
+                self.canny_low_spin.setValue(self.params.canny_low)
+                self.canny_high_spin.setValue(self.params.canny_high)
+                self.min_gradient_spin.setValue(self.params.min_gradient)
+                self.profile_half_spin.setValue(self.params.profile_half_width_px)
+                self.profile_step_spin.setValue(self.params.profile_step_px)
+                self._set_combo_value(self.fit_mode_combo, self.params.fitting_mode)
+                self._set_combo_value(self.upper_fit_mode_combo, getattr(self.params, "upper_fitting_mode", self.params.fitting_mode))
+                self._set_combo_value(self.lower_fit_mode_combo, getattr(self.params, "lower_fitting_mode", self.params.fitting_mode))
+                self.ransac_check.setChecked(self.params.use_ransac)
+                self.residual_limit_spin.setValue(self.params.residual_limit_px)
+                self.min_edge_points_spin.setValue(self.params.min_edge_points)
+                self._set_combo_value(self.polarity_combo, self.params.polarity)
+                self.measurement_timeout_spin.setValue(getattr(self.params, "measurement_timeout_s", 180))
+                if hasattr(self, "roi_type_combo"):
+                    self._set_combo_value(
+                        self.roi_type_combo,
+                        getattr(self.params, "auto_refine_roi_type", "Caliper Circle"),
+                    )
+                self._set_combo_value(self.auto_reference_combo, getattr(self.config, "auto_reference_label", ""))
+                self._set_combo_value(self.auto_target_combo, getattr(self.config, "auto_target_label", ""))
+            finally:
+                for widget, was_blocked in previous_blocked:
+                    widget.blockSignals(was_blocked)
+                self._updating_quality_controls = previous_quality
+                self._syncing_parameter_controls = previous_sync
+            self._refresh_quality_profile_hint()
 
         def _current_roi_entry(self):
             mark_id = self.mark_combo.currentText() or "Mark1"
@@ -756,7 +807,12 @@ class MainWindowStateMixin:
                     # reimport of the same path) still resets the canvas.
                     if cached is not None and cached[0] is source:
                         return cached[1]
-                    image = resolve_image(source)
+                    try:
+                        image = resolve_image(source)
+                    except (ValueError, OSError) as exc:
+                        self.runtime_logger.warning("Failed to resolve batch preview image %s: %s", getattr(source, "path", source), exc)
+                        cache.pop(key, None)
+                        return None
                     cache[key] = (source, image)
                     return image
             cache.pop(key, None)
@@ -1296,7 +1352,7 @@ class MainWindowStateMixin:
             self.lower_canvas.setVisible(is_dual)
             if hasattr(self, "lower_image_card"):
                 self.lower_image_card.setVisible(is_dual)
-            self.import_lower_btn.setEnabled(is_dual)
+            self.import_lower_btn.setEnabled(is_dual and not self._calculation_running)
             if hasattr(self, "import_upper_action"):
                 self.import_upper_action.setEnabled(not self._calculation_running)
                 self.import_lower_action.setEnabled(is_dual and not self._calculation_running)
@@ -1506,7 +1562,7 @@ class MainWindowStateMixin:
 
         def _build_summary_rows(self):
             overlay_map = self.auto_overlays if self._is_auto_workflow() else self.overlays
-            is_trial = self._is_auto_workflow() and self.config.recipe_validation_status != "Validated"
+            is_trial = self.config.recipe_validation_status != "Validated"
             return build_summary_rows(overlay_map, self.config, is_trial=is_trial)
 
         def _set_result_card(self, value_label: QLabel, unit_label: QLabel, value: str, unit: str, color: str = "#1D1D1F"):
@@ -1523,9 +1579,9 @@ class MainWindowStateMixin:
                 dx_key = next((key for key in first if key.startswith("Dx")), "")
                 dy_key = next((key for key in first if key.startswith("Dy")), "")
                 dxy_key = next((key for key in first if key.startswith("Dxy")), "")
-                dx = float(first.get(dx_key, 0.0))
-                dy = float(first.get(dy_key, 0.0))
-                dxy = float(first.get(dxy_key, 0.0))
+                dx_val = first.get(dx_key)
+                dy_val = first.get(dy_key)
+                dxy_val = first.get(dxy_key)
                 verdict = first.get("判定", "--")
                 if verdict == "通过":
                     color = "#34C759"
@@ -1533,9 +1589,12 @@ class MainWindowStateMixin:
                     color = "#FF3B30"
                 else:
                     color = "#FFCC00"
-                self._set_result_card(self.dx_value_label, self.dx_unit_label, f"{dx:+.3f}", "μm", "#007AFF")
-                self._set_result_card(self.dy_value_label, self.dy_unit_label, f"{dy:+.3f}", "μm", "#FF9500")
-                self._set_result_card(self.r_value_label, self.r_unit_label, f"{dxy:.3f}", "μm")
+                dx_text = f"{float(dx_val):+.3f}" if dx_val is not None and np.isfinite(float(dx_val)) else "--"
+                dy_text = f"{float(dy_val):+.3f}" if dy_val is not None and np.isfinite(float(dy_val)) else "--"
+                dxy_text = f"{float(dxy_val):.3f}" if dxy_val is not None and np.isfinite(float(dxy_val)) else "--"
+                self._set_result_card(self.dx_value_label, self.dx_unit_label, dx_text, "μm", "#007AFF")
+                self._set_result_card(self.dy_value_label, self.dy_unit_label, dy_text, "μm", "#FF9500")
+                self._set_result_card(self.r_value_label, self.r_unit_label, dxy_text, "μm")
                 result_note = {
                     "通过": "符合规格",
                     "超限": "对位结果超出规格",
@@ -1821,7 +1880,7 @@ class MainWindowStateMixin:
                     ov_rows.append([
                         project,
                         key,
-                        f"{value:.3f}" if isinstance(value, float) else value,
+                        f"{value:.3f}" if isinstance(value, float) else ("—" if value is None else value),
                         verdict,
                         profile,
                         grade,

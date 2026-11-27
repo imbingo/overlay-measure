@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from .recipe_manager import load_recipe
-from .recipe_integrity import seal_recipe
+from .recipe_integrity import seal_recipe, verify_recipe
 
 
 @dataclass(frozen=True)
@@ -314,6 +314,9 @@ class RecipeLibrary:
 
     def import_recipe(self, source_path: Path | str) -> Path:
         source = Path(source_path).expanduser().resolve()
+        integrity_status, _ = verify_recipe(source)
+        if integrity_status == "Mismatch":
+            raise ValueError("配方文件内容与已保存的 SHA-256 哈希不一致，已阻止导入。")
         config, _, _ = load_recipe(str(source))
         status = str(getattr(config, "recipe_validation_status", ""))
         destination_dir = self.root / self._status_directory(status)
@@ -330,6 +333,13 @@ class RecipeLibrary:
                 return destination
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             destination = destination_dir / f"{stem}_{timestamp}.json"
+            suffix = 1
+            while destination.exists():
+                if self._same_file_content(source, destination):
+                    seal_recipe(destination)
+                    return destination
+                destination = destination_dir / f"{stem}_{timestamp}_{suffix}.json"
+                suffix += 1
         shutil.copy2(source, destination)
         seal_recipe(destination)
         return destination

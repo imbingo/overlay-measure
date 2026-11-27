@@ -19,7 +19,7 @@ def test_v224_toolbar_layout_is_preserved_in_production_mode():
     window.show()
     app.processEvents()
 
-    assert window.operation_mode == "Production"
+    assert window.operation_mode == "Engineering"
     assert window.load_recipe_btn.isVisible()
     assert window.analyze_all_btn.isVisible()
     assert window.export_btn.isVisible()
@@ -34,7 +34,7 @@ def test_v224_toolbar_layout_is_preserved_in_production_mode():
     assert window.import_lower_btn.isVisible()
     assert window.reset_measurement_btn.isVisible()
     assert not window.import_images_btn.isVisible()
-    assert not window.more_actions_btn.isVisible()
+    assert window.more_actions_btn.isVisible()
     assert window.cancel_progress_btn.isHidden()
     window.close()
     app.processEvents()

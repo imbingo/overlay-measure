@@ -129,7 +129,7 @@ def detect_approximate_line(
         center_x_px=float(center_point[0]),
         center_y_px=float(center_point[1]),
         center_x_um=float(center_point[0] * config.pixel_size_x_um),
-        center_y_um=float(center_point[1] * config.pixel_size_y_um),
+        center_y_um=float((float(image.gray.shape[0]) - center_point[1]) * config.pixel_size_y_um),
         diameter_px=float(np.linalg.norm(end - start)),
         diameter_um=float(np.hypot(
             (end[0] - start[0]) * config.pixel_size_x_um,

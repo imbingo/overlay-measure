@@ -40,7 +40,7 @@ def test_theme_control_next_to_operation_mode_and_menu_switches(theme):
                 window.resize(width, height)
                 app.processEvents()
                 assert window.width() == width
-                assert window.theme_button.x() > window.operation_mode_combo.geometry().right()
+                assert window.theme_button.x() > window.version_label.geometry().right()
                 assert window.theme_button.geometry().right() < window.recent_images_btn.x()
         actions = window.theme_button.menu().actions()
         assert [action.text() for action in actions] == ["浅色", "深色", "跟随系统"]

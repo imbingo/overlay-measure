@@ -1077,7 +1077,7 @@ class ImageCanvas(QLabel):
         self.update()
 
     def _make_pixmap(self, image: ImageData) -> QPixmap:
-        u8 = display_to_uint8(image, self.display_enhancement)
+        u8 = np.ascontiguousarray(display_to_uint8(image, self.display_enhancement))
         h, w = u8.shape
         qimg = QImage(u8.data, w, h, w, QImage.Format_Grayscale8).copy()
         return QPixmap.fromImage(qimg)

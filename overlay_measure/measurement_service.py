@@ -101,6 +101,13 @@ def describe_algorithm_path(detection: Optional[DetectionResult], workflow: str 
     return str(detection.shape_params.get("algorithm_path") or _algorithm_path_for_detection(detection, workflow))
 
 
+def _physical_center_y_um(center_y_px: float, config: MeasurementConfig, image_height: Optional[int] = None) -> float:
+    """Convert image Y-down pixel center to UI/equipment Y-up physical coordinate (origin at bottom-left)."""
+    if image_height is not None and image_height > 0:
+        return (float(image_height) - float(center_y_px)) * config.pixel_size_y_um
+    return float(center_y_px) * config.pixel_size_y_um
+
+
 def _fit_to_detection(
     mark_id: str,
     layer: str,
@@ -110,6 +117,7 @@ def _fit_to_detection(
     roi: Roi,
     warning: str = "",
     use_ransac: bool = True,
+    image_height: Optional[int] = None,
 ) -> DetectionResult:
     shape_params = {
         **fit.shape_params,
@@ -156,7 +164,7 @@ def _fit_to_detection(
         center_x_px=fit.center_x_px,
         center_y_px=fit.center_y_px,
         center_x_um=fit.center_x_px * config.pixel_size_x_um,
-        center_y_um=fit.center_y_px * config.pixel_size_y_um,
+        center_y_um=_physical_center_y_um(fit.center_y_px, config, image_height),
         diameter_px=fit.diameter_px,
         diameter_um=diameter_um,
         residual_px=fit.residual_px,
@@ -208,7 +216,14 @@ def detect_manual_roi(
         )
 
     if getattr(roi, "roi_type", "") == "Caliper Circle":
-        cal = detect_caliper_circle(image.gray, roi, params)
+        import inspect
+        sig_params = inspect.signature(detect_caliper_circle).parameters
+        kwargs = {}
+        if "pixel_scale" in sig_params and not np.isclose(config.pixel_size_x_um, config.pixel_size_y_um, rtol=1e-6, atol=1e-9):
+            kwargs["pixel_scale"] = (config.pixel_size_x_um, config.pixel_size_y_um)
+        if "cancelled" in sig_params and cancelled is not None:
+            kwargs["cancelled"] = cancelled
+        cal = detect_caliper_circle(image.gray, roi, params, **kwargs)
         contour_metrics = contour_ellipse_metrics_um(cal.edge_points, config)
         diameter_um, residual_um = radial_diameter_residual_um(
             cal.edge_points,
@@ -251,7 +266,7 @@ def detect_manual_roi(
             center_x_px=cal.center_x_px,
             center_y_px=cal.center_y_px,
             center_x_um=cal.center_x_px * config.pixel_size_x_um,
-            center_y_um=cal.center_y_px * config.pixel_size_y_um,
+            center_y_um=_physical_center_y_um(cal.center_y_px, config, int(image.gray.shape[0])),
             diameter_px=reported_diameter_px,
             diameter_um=reported_diameter_um,
             residual_px=cal.residual_px,
@@ -307,7 +322,10 @@ def detect_manual_roi(
     if detect_params.fitting_mode == "RegionCenter":
         fit = detect_region_center(image.gray, roi, detect_params)
         used_points = np.asarray(fit.shape_params.get("contour_points", []), dtype=np.float64)
-        return _fit_to_detection(mark_id, layer, fit, used_points, config, roi, use_ransac=detect_params.use_ransac)
+        return _fit_to_detection(
+            mark_id, layer, fit, used_points, config, roi,
+            use_ransac=detect_params.use_ransac, image_height=int(image.gray.shape[0]),
+        )
 
     if getattr(roi, "roi_type", "") in {"Circle", "Ellipse", "Rectangle", "Region Center", "Robust Center"}:
         expected_shape = "Circle" if detect_params.fitting_mode in {"Circle", "Ellipse"} else "Rectangle"
@@ -324,8 +342,16 @@ def detect_manual_roi(
         )
     if cancelled and cancelled():
         raise InterruptedError("用户取消计算")
-    fit = fit_mark_shape(edges.points_xy, detect_params, cancelled=cancelled)
+    fit = fit_mark_shape(
+        edges.points_xy,
+        detect_params,
+        cancelled=cancelled,
+        pixel_scale=(config.pixel_size_x_um, config.pixel_size_y_um),
+    )
     used_points = edges.points_xy
     if fit.inlier_mask is not None and len(fit.inlier_mask) == len(edges.points_xy):
         used_points = edges.points_xy[fit.inlier_mask]
-    return _fit_to_detection(mark_id, layer, fit, used_points, config, roi, edges.warning, detect_params.use_ransac)
+    return _fit_to_detection(
+        mark_id, layer, fit, used_points, config, roi, edges.warning,
+        detect_params.use_ransac, image_height=int(image.gray.shape[0]),
+    )

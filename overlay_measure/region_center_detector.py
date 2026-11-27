@@ -87,13 +87,13 @@ def _clean_binary(binary: np.ndarray, roi_mask: np.ndarray, min_area: float, max
     cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel5, iterations=1)
     cleaned = cv2.bitwise_and(cleaned, roi_mask)
 
-    # Fill holes per component. This improves rounded-square holes while not
-    # reintroducing remote speckles.
-    flood = cleaned.copy()
-    h, w = flood.shape
-    ff_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
-    cv2.floodFill(flood, ff_mask, (0, 0), 255)
-    holes = cv2.bitwise_not(flood)
+    # Fill holes per component. Pad with a 1-pixel zero border so a foreground
+    # pixel touching corner (0, 0) never blocks background flood fill.
+    padded = cv2.copyMakeBorder(cleaned, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
+    ph, pw = padded.shape
+    ff_mask = np.zeros((ph + 2, pw + 2), dtype=np.uint8)
+    cv2.floodFill(padded, ff_mask, (0, 0), 255)
+    holes = cv2.bitwise_not(padded[1:-1, 1:-1])
     filled = cv2.bitwise_or(cleaned, cv2.bitwise_and(holes, roi_mask))
     filled = _remove_small_components(filled, min_area, max_area)
     return filled

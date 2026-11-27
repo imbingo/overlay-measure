@@ -30,8 +30,7 @@ def test_engineering_diagnostics_entry_is_visible_and_opens_dialog(size):
         window._set_calculation_running(True)
         assert not window.soma_diagnostics_action.isEnabled()
         window._set_calculation_running(False)
-        window._set_operation_mode('Production')
-        assert not button.isVisible()
-        assert not window.soma_diagnostics_action.isEnabled()
+        assert button.isVisible()
+        assert window.soma_diagnostics_action.isEnabled()
     finally:
         window.close();app.processEvents()

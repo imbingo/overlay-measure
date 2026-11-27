@@ -208,8 +208,16 @@ def fit_circle_ransac(
 def fit_ellipse(points: np.ndarray) -> FitResult:
     if len(points) < 5:
         raise ValueError("椭圆拟合至少需要 5 个点")
-    pts = points.astype(np.float32).reshape(-1, 1, 2)
-    (cx, cy), (major, minor), angle = cv2.fitEllipse(pts)
+    centered = np.asarray(points, dtype=np.float64)
+    if not np.isfinite(centered).all() or np.linalg.matrix_rank(centered - np.mean(centered, axis=0)) < 2:
+        raise ValueError("边缘点退化或共线，无法拟合椭圆")
+    pts = centered.astype(np.float32).reshape(-1, 1, 2)
+    try:
+        (cx, cy), (major, minor), angle = cv2.fitEllipse(pts)
+    except cv2.error as exc:
+        raise ValueError(f"椭圆拟合失败：{exc}") from exc
+    if not np.isfinite([cx, cy, major, minor, angle]).all() or min(major, minor) <= 1e-6:
+        raise ValueError("椭圆拟合结果退化")
     # Normalize major >= minor
     if minor > major:
         major, minor = minor, major
@@ -425,6 +433,7 @@ def fit_mark_shape(
     points: np.ndarray,
     params: DetectionParams,
     cancelled: Optional[Callable[[], bool]] = None,
+    pixel_scale: Optional[Tuple[float, float]] = None,
 ) -> FitResult:
     if points is None or len(points) < 3:
         raise ValueError("有效边缘点数量不足，无法拟合")
@@ -437,22 +446,44 @@ def fit_mark_shape(
     if mode == "RegionCenter":
         return fit_region_center(points)
 
+    sx, sy = (1.0, 1.0)
+    if pixel_scale is not None:
+        sx = float(pixel_scale[0]) if pixel_scale[0] > 0 else 1.0
+        sy = float(pixel_scale[1]) if pixel_scale[1] > 0 else 1.0
+    anisotropic = not np.isclose(sx, sy, rtol=1e-6, atol=1e-9)
+
     circle_result = None
     if mode in {"Auto", "Circle"} and len(points) >= 3:
         try:
+            if anisotropic:
+                mean_scale = float(np.sqrt(sx * sy))
+                fit_pts = np.column_stack((points[:, 0] * sx, points[:, 1] * sy))
+                threshold = float(params.residual_limit_px) * mean_scale
+            else:
+                mean_scale = 1.0
+                fit_pts = points
+                threshold = float(params.residual_limit_px)
             if params.use_ransac:
-                cx, cy, r, residual, mask = fit_circle_ransac(
-                    points, params.residual_limit_px, cancelled=cancelled
+                cx_fit, cy_fit, r_fit, residual_fit, mask = fit_circle_ransac(
+                    fit_pts, threshold, cancelled=cancelled
                 )
             else:
-                initial_cx, initial_cy, initial_r, _ = fit_circle_least_squares(points)
-                cx, cy, r, residual = fit_circle_geometric_robust(
-                    points,
+                initial_cx, initial_cy, initial_r, _ = fit_circle_least_squares(fit_pts)
+                cx_fit, cy_fit, r_fit, residual_fit = fit_circle_geometric_robust(
+                    fit_pts,
                     (initial_cx, initial_cy, initial_r),
                 )
                 mask = np.ones(len(points), dtype=bool)
+            if anisotropic:
+                cx = float(cx_fit / sx)
+                cy = float(cy_fit / sy)
+                r = float(r_fit / mean_scale)
+                residual = float(residual_fit / mean_scale)
+            else:
+                cx, cy, r, residual = float(cx_fit), float(cy_fit), float(r_fit), float(residual_fit)
             statistics = circle_diameter_statistics(points[mask], cx, cy)
-            r = statistics["average_radius_px"] or r
+            if not anisotropic:
+                r = statistics["average_radius_px"] or r
             roundness = 1.0
             conf = _confidence(int(np.sum(mask)), residual, roundness)
             circle_result = FitResult(

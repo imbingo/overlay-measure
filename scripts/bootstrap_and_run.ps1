@@ -20,19 +20,22 @@ function Write-Step([string]$message) {
 
 function Test-CompatiblePython([string]$command, [string[]]$prefixArguments) {
     try {
-        $version = & $command @prefixArguments -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $version) {
+        $probe = & $command @prefixArguments -c "import struct, sys; print(f'{sys.version_info.major}.{sys.version_info.minor}:{struct.calcsize(\"P\")*8}')" 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $probe) {
             return $null
         }
 
-        $parts = $version.Trim().Split(".")
+        $tokens = $probe.Trim().Split(":")
+        $version = $tokens[0]
+        $bits = if ($tokens.Length -gt 1) { [int]$tokens[1] } else { 0 }
+        $parts = $version.Split(".")
         $major = [int]$parts[0]
         $minor = [int]$parts[1]
-        if ($major -eq 3 -and $minor -ge 10 -and $minor -lt 14) {
+        if ($major -eq 3 -and $minor -ge 10 -and $minor -lt 14 -and $bits -eq 64) {
             return @{
                 Command = $command
                 PrefixArguments = $prefixArguments
-                Version = $version.Trim()
+                Version = $version
             }
         }
     }

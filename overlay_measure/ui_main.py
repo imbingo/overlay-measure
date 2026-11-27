@@ -182,7 +182,7 @@ class MainWindow(
         self.dialog_state_store = DialogStateStore()
         self.recipe_quick_menu: Optional[RecipeQuickMenu] = None
         self.access_controller = AccessController()
-        self.operation_mode = "Production"
+        self.operation_mode = "Engineering"
         self.runtime_logger = build_runtime_logger()
         self.recovery_store = RecoveryStore()
         self.last_measurement_id = ""
@@ -217,7 +217,6 @@ class MainWindow(
         theme_manager().register(self)
         if QApplication.platformName().lower() != "offscreen":
             QTimer.singleShot(0, self._offer_recovery)
-            QTimer.singleShot(200, self._warn_default_engineering_password)
 
     @staticmethod
     def _empty_roi_sources() -> dict:
@@ -433,6 +432,7 @@ class MainWindow(
             if thread is not None and thread.isRunning():
                 if worker is not None:
                     worker.cancel()
+                thread.quit()
                 if not thread.wait(5000):
                     event.ignore()
                     QMessageBox.information(

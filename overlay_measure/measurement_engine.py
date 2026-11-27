@@ -55,9 +55,18 @@ def _choose_auto_selection(
     reference = resolve_preferred_candidate(preferred.get("reference_label", ""), detections)
     target = resolve_preferred_candidate(preferred.get("target_label", ""), detections)
     if reference not in references:
-        reference = references[0] if references else ""
+        reference = next(
+            (label for label in references if next(iter(detections[label].values())).layer == "upper"),
+            references[0] if references else "",
+        )
     if target not in targets or target == reference:
-        target = next((label for label in targets if label != reference), "")
+        target = next(
+            (
+                label for label in targets
+                if label != reference and next(iter(detections[label].values())).layer == "lower"
+            ),
+            next((label for label in targets if label != reference), ""),
+        )
     return reference, target
 
 
@@ -278,9 +287,17 @@ def _run_count(job: dict, mark_id: str) -> int:
 
 
 def _mean_overlay(mark_id: str, overlays: list[OverlayResult], config: MeasurementConfig) -> OverlayResult:
-    dx = float(np.mean([item.delta_x_um for item in overlays]))
-    dy = float(np.mean([item.delta_y_um for item in overlays]))
+    finite_overlays = [
+        item for item in overlays
+        if np.isfinite(item.delta_x_um) and np.isfinite(item.delta_y_um) and np.isfinite(item.overlay_r_um)
+    ]
+    if not finite_overlays:
+        return _terminal_overlay(mark_id, "Error", "批量测量结果包含非有限数值（NaN/Inf）")
+    dx = float(np.mean([item.delta_x_um for item in finite_overlays]))
+    dy = float(np.mean([item.delta_y_um for item in finite_overlays]))
     radius = float(np.hypot(dx, dy))
+    if not (np.isfinite(dx) and np.isfinite(dy) and np.isfinite(radius)):
+        return _terminal_overlay(mark_id, "Error", "批量均值结果包含非有限数值（NaN/Inf）")
     warnings = []
     if abs(dx) > config.delta_x_limit_um:
         warnings.append("Dx均值超限")
@@ -289,7 +306,7 @@ def _mean_overlay(mark_id: str, overlays: list[OverlayResult], config: Measureme
     if radius > config.overlay_r_limit_um:
         warnings.append("Dxy均值超限")
     result = OverlayResult(mark_id, 0.0, 0.0, dx, dy, radius, "Fail" if warnings else "Pass", "；".join(warnings))
-    first = overlays[0]
+    first = finite_overlays[0]
     result.reference_contour_id = first.reference_contour_id
     result.target_contour_id = first.target_contour_id
     result.reference_contour_name = first.reference_contour_name
@@ -301,10 +318,10 @@ def _mean_overlay(mark_id: str, overlays: list[OverlayResult], config: Measureme
         "较差（仅宽容可用）": 2,
         "无效（低于宽容门槛）": 3,
     }
-    grades = [item.quality_grade for item in overlays if item.quality_grade]
+    grades = [item.quality_grade for item in finite_overlays if item.quality_grade]
     if grades:
         result.quality_grade = max(grades, key=lambda grade: grade_order.get(grade, 99))
-    result.quality_summary = f"{len(overlays)} 次有效测量；最差质量={result.quality_grade or '未评估'}"
+    result.quality_summary = f"{len(finite_overlays)} 次有效测量；最差质量={result.quality_grade or '未评估'}"
     if config.recipe_validation_status != "Validated":
         result.result = "Trial"
         result.warning = "试测/未验证配方，不作正式判定"
@@ -491,9 +508,7 @@ def run_measurement_job(job: dict, progress: ProgressCallback, cancelled: Cancel
         if is_batch and payload["batch_overlays"][mark_id]:
             target = payload["auto_overlays"] if is_auto else payload["overlays"]
             target[mark_id] = _mean_overlay(mark_id, payload["batch_overlays"][mark_id], config)
-        elif is_batch and any(
-            record.get("overlay") is not None for record in payload["batch_records"][mark_id]
-        ):
+        elif is_batch and payload["batch_records"][mark_id]:
             target = payload["auto_overlays"] if is_auto else payload["overlays"]
             invalid = [
                 item["overlay"] for item in payload["batch_records"][mark_id]
@@ -504,7 +519,7 @@ def run_measurement_job(job: dict, progress: ProgressCallback, cancelled: Cancel
                 target[mark_id] = _terminal_overlay(mark_id, "Invalid", warning)
             else:
                 errors = [item.get("error", "") for item in payload["batch_records"][mark_id] if item.get("error")]
-                target[mark_id] = _terminal_overlay(mark_id, "Error", "；".join(dict.fromkeys(errors)))
+                target[mark_id] = _terminal_overlay(mark_id, "Error", "；".join(dict.fromkeys(errors)) or "批量测量失败")
     if geometry_configured:
         geometry_runs = []
         run_indexes = sorted(geometry_detection_runs) or [0]

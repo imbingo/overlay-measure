@@ -37,13 +37,26 @@ class AutoDetectReport:
         return "；".join(warnings)
 
 
-def _refine_contour_points(gray: np.ndarray, contour: np.ndarray, params: DetectionParams) -> Tuple[np.ndarray, np.ndarray]:
-    """Move contour samples to the local maximum gray-gradient position."""
+def _precompute_gradient_maps(gray: np.ndarray, params: DetectionParams) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     image = gray.astype(np.float32)
     sigma = max(0.0, float(params.gaussian_sigma_px))
     blurred = cv2.GaussianBlur(image, (0, 0), sigmaX=sigma, sigmaY=sigma) if sigma > 0 else image
     gx = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3)
     gy = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3)
+    return blurred, gx, gy
+
+
+def _refine_contour_points(
+    gray: np.ndarray,
+    contour: np.ndarray,
+    params: DetectionParams,
+    precomputed: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Move contour samples to the local maximum gray-gradient position."""
+    if precomputed is None:
+        blurred, gx, gy = _precompute_gradient_maps(gray, params)
+    else:
+        blurred, gx, gy = precomputed
     points = contour.reshape(-1, 2).astype(np.float64)
     stride = max(1, len(points) // 240)
     points = points[::stride]
@@ -52,6 +65,7 @@ def _refine_contour_points(gray: np.ndarray, contour: np.ndarray, params: Detect
     offsets = np.arange(-half_width, half_width + step * 0.5, step, dtype=np.float32)
     if len(offsets) < 5:
         offsets = np.linspace(-half_width, half_width, 9, dtype=np.float32)
+        step = float(offsets[1] - offsets[0])
 
     refined = []
     gradients = []
@@ -103,8 +117,12 @@ def _contour_geometry(points: np.ndarray) -> dict:
     (_, _), (rect_width, rect_height), angle = rectangle
     rect_width = float(max(rect_width, 1e-9))
     rect_height = float(max(rect_height, 1e-9))
-    width = max(rect_width, rect_height)
-    height = min(rect_width, rect_height)
+    if rect_height > rect_width:
+        width, height = rect_height, rect_width
+        angle = float(angle) + 90.0
+    else:
+        width, height = rect_width, rect_height
+        angle = float(angle)
     rectangularity = area / max(rect_width * rect_height, 1e-9)
     circularity = float(4.0 * np.pi * area / (perimeter * perimeter))
     approximate = cv2.approxPolyDP(contour, 0.025 * perimeter, True)
@@ -242,7 +260,7 @@ def _detect_complete_circles(
                 center_x_px=center_x,
                 center_y_px=center_y,
                 center_x_um=center_x * pixel_size_x_um,
-                center_y_um=center_y * pixel_size_y_um,
+                center_y_um=(float(gray.shape[0]) - center_y) * pixel_size_y_um,
                 diameter_px=2.0 * radius,
                 diameter_um=2.0 * radius * mean_pixel_size,
                 residual_px=residual,
@@ -325,6 +343,7 @@ def detect_auto_marks_with_report(
     truncated_by_contour_limit = False
     truncated_by_time = False
     truncated_by_result_limit = False
+    precomputed_gradients = _precompute_gradient_maps(gray, params)
     for mask in masks:
         contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         total_contours += len(contours)
@@ -352,7 +371,7 @@ def detect_auto_marks_with_report(
             # Very long contours are sampled before subpixel refinement to keep auto detection responsive.
             if len(contour) > 1200:
                 contour = contour[::max(1, len(contour) // 1200)]
-            refined, gradients = _refine_contour_points(gray, contour, params)
+            refined, gradients = _refine_contour_points(gray, contour, params, precomputed=precomputed_gradients)
             if len(refined) < 12:
                 continue
             base_geometry = _contour_geometry(refined)
@@ -385,7 +404,7 @@ def detect_auto_marks_with_report(
                         center_x_px=geometry["center_x"],
                         center_y_px=geometry["center_y"],
                         center_x_um=geometry["center_x"] * pixel_size_x_um,
-                        center_y_um=geometry["center_y"] * pixel_size_y_um,
+                        center_y_um=(float(gray.shape[0]) - geometry["center_y"]) * pixel_size_y_um,
                         diameter_px=2.0 * geometry["radius_px"],
                         diameter_um=2.0 * geometry["radius_px"] * mean_pixel_size,
                         residual_px=geometry["residual_px"],

@@ -24,24 +24,41 @@ def _um_to_px(value_um: float, pixel_size_um: float) -> float:
 
 
 def calculate_overlay(mark_id: str, upper: DetectionResult, lower: DetectionResult, config: MeasurementConfig) -> OverlayResult:
+    """Calculate overlay misalignment as Lower (target) minus Upper (reference), Y up-positive."""
     off_x_px = config.registration_offset_x_um / config.pixel_size_x_um if config.pixel_size_x_um else 0.0
     off_y_px = config.registration_offset_y_um / config.pixel_size_y_um if config.pixel_size_y_um else 0.0
 
-    lower_x_corr_px = lower.center_x_px + off_x_px
+    # Registration offsets are specified in equipment coordinates (X right-positive,
+    # Y up-positive). Under Lower - Upper, subtract offset from lower in equipment
+    # coordinates (which is -off_x_px in X, +off_y_px in image Y-down).
+    lower_x_corr_px = lower.center_x_px - off_x_px
     lower_y_corr_px = lower.center_y_px + off_y_px
 
     # Internal image coordinates use X right-positive and Y down-positive.
-    # Measurement output follows equipment/Keyence-style coordinates:
-    # X right-positive, Y up-positive. Therefore only the final Y delta is inverted.
-    delta_x_px = upper.center_x_px - lower_x_corr_px
-    delta_y_image_px = upper.center_y_px - lower_y_corr_px
+    # Measurement output follows UI/equipment coordinates:
+    # X right-positive, Y up-positive, defined as Lower - Upper.
+    delta_x_px = lower_x_corr_px - upper.center_x_px
+    delta_y_image_px = lower_y_corr_px - upper.center_y_px
     delta_y_px = -delta_y_image_px
     comp_x_um, comp_y_um = _angle_compensation_um(config)
     delta_x_um = delta_x_px * config.pixel_size_x_um + comp_x_um
     delta_y_um = delta_y_px * config.pixel_size_y_um + comp_y_um
     delta_x_px += _um_to_px(comp_x_um, config.pixel_size_x_um)
     delta_y_px += _um_to_px(comp_y_um, config.pixel_size_y_um)
-    r_um = math.sqrt(delta_x_um * delta_x_um + delta_y_um * delta_y_um)
+    r_um = math.hypot(delta_x_um, delta_y_um)
+
+    if not (math.isfinite(delta_x_um) and math.isfinite(delta_y_um) and math.isfinite(r_um)):
+        overlay = OverlayResult(
+            mark_id=mark_id,
+            delta_x_px=0.0,
+            delta_y_px=0.0,
+            delta_x_um=0.0,
+            delta_y_um=0.0,
+            overlay_r_um=0.0,
+            result="Error",
+            warning="对位计算结果包含非有限数值（NaN/Inf）",
+        )
+        return apply_quality_gate(overlay, (upper, lower), config)
 
     warnings = []
     if abs(delta_x_um) > config.delta_x_limit_um:
@@ -70,13 +87,13 @@ def calculate_relative_overlay(
     target: DetectionResult,
     config: MeasurementConfig,
 ) -> OverlayResult:
-    """Calculate target position relative to the selected reference contour."""
+    """Calculate target position relative to the selected reference contour (target - reference, Y up-positive)."""
     offset_x_px = config.registration_offset_x_um / config.pixel_size_x_um if config.pixel_size_x_um else 0.0
     offset_y_px = config.registration_offset_y_um / config.pixel_size_y_um if config.pixel_size_y_um else 0.0
 
     def corrected_center(detection: DetectionResult):
         if config.mode == "Dual Image" and detection.layer == "lower":
-            return detection.center_x_px + offset_x_px, detection.center_y_px + offset_y_px
+            return detection.center_x_px - offset_x_px, detection.center_y_px + offset_y_px
         return detection.center_x_px, detection.center_y_px
 
     reference_x, reference_y = corrected_center(reference)
@@ -93,6 +110,18 @@ def calculate_relative_overlay(
     delta_x_px += _um_to_px(comp_x_um, config.pixel_size_x_um)
     delta_y_px += _um_to_px(comp_y_um, config.pixel_size_y_um)
     distance_um = math.hypot(delta_x_um, delta_y_um)
+    if not (math.isfinite(delta_x_um) and math.isfinite(delta_y_um) and math.isfinite(distance_um)):
+        overlay = OverlayResult(
+            mark_id=mark_id,
+            delta_x_px=0.0,
+            delta_y_px=0.0,
+            delta_x_um=0.0,
+            delta_y_um=0.0,
+            overlay_r_um=0.0,
+            result="Error",
+            warning="对位计算结果包含非有限数值（NaN/Inf）",
+        )
+        return apply_quality_gate(overlay, (reference, target), config)
     warnings = []
     if abs(delta_x_um) > config.delta_x_limit_um:
         warnings.append("Dx 超限")

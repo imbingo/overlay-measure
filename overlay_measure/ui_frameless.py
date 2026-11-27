@@ -55,13 +55,20 @@ class FramelessWindowMixin:
 
     def nativeEvent(self, event_type, message):
         if sys.platform == "win32" and not self.isMaximized() and not self.isFullScreen():
+            if bytes(event_type) != b"windows_generic_MSG":
+                return super().nativeEvent(event_type, message)
             import ctypes
             from ctypes import wintypes
+
+            get_window_rect = ctypes.windll.user32.GetWindowRect
+            if not getattr(get_window_rect, "argtypes", None):
+                get_window_rect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+                get_window_rect.restype = wintypes.BOOL
 
             msg = wintypes.MSG.from_address(int(message))
             if msg.message == self._WM_NCHITTEST:
                 rect = wintypes.RECT()
-                if ctypes.windll.user32.GetWindowRect(int(self.winId()), ctypes.byref(rect)):
+                if get_window_rect(wintypes.HWND(int(self.winId())), ctypes.byref(rect)):
                     packed_position = int(msg.lParam)
                     x = ctypes.c_short(packed_position & 0xFFFF).value
                     y = ctypes.c_short((packed_position >> 16) & 0xFFFF).value

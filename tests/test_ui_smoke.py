@@ -33,13 +33,13 @@ def test_main_window_algorithm_path_status_button_smoke(monkeypatch):
     assert window.version_label.text() == f"V{__version__}"
     assert window.batch_detail_combo.count() == 0
     assert window.batch_detail_bar.isHidden()
-    assert window.operation_mode == "Production"
-    assert window.operation_mode_combo.currentData() == "Production"
+    assert window.operation_mode == "Engineering"
+    assert window.operation_mode_combo.isHidden()
     assert window.quality_profile_combo.currentData() == "Standard"
     assert "当前：标准" in window.quality_profile_hint.text()
-    assert not window.side_tabs.isTabEnabled(2)
-    assert not window.side_tabs.isTabEnabled(3)
-    assert not window.change_engineering_password_btn.isEnabled()
+    assert window.side_tabs.isTabEnabled(2)
+    assert window.side_tabs.isTabEnabled(3)
+    assert window.change_engineering_password_btn.isHidden()
     assert window.load_recipe_btn.text().startswith("当前配方：未加载")
     window.show_recipe_quick_menu()
     app.processEvents()

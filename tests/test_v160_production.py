@@ -52,22 +52,15 @@ def test_default_engineering_password_is_hashed(tmp_path):
     assert "admin123" not in controller.settings_path.read_text(encoding="utf-8")
 
 
-def test_engineering_mode_requires_password(monkeypatch, tmp_path):
+def test_engineering_mode_default_without_production_lock(tmp_path):
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
     window.access_controller = AccessController(tmp_path)
-    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.Ok)
-
-    monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: ("wrong", True))
-    window.operation_mode_combo.setCurrentIndex(window.operation_mode_combo.findData("Engineering"))
-    assert window.operation_mode == "Production"
-
-    monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: ("admin123", True))
-    window.operation_mode_combo.setCurrentIndex(window.operation_mode_combo.findData("Engineering"))
     assert window.operation_mode == "Engineering"
+    assert window.operation_mode_combo.isHidden()
     assert window.side_tabs.isTabEnabled(2)
     assert window.side_tabs.isTabEnabled(3)
-    assert window.change_engineering_password_btn.isEnabled()
+    assert window.change_engineering_password_btn.isHidden()
     window.close()
     app.processEvents()
 
@@ -173,19 +166,9 @@ def test_traceability_archive_contains_hashes_and_results(monkeypatch, tmp_path)
     assert manifest["results"]["Mark1"]["result"] == "Pass"
 
 
-def test_production_preflight_requires_verified_recipe_and_operator(tmp_path):
+def test_preflight_allows_measurement_without_production_mode_lock(tmp_path):
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
-    assert window._production_preflight_errors()
-
-    recipe = tmp_path / "recipe.json"
-    recipe.write_text("{}", encoding="utf-8")
-    window.loaded_recipe_path = str(recipe)
-    window.loaded_recipe_hash = seal_recipe(recipe)
-    window.recipe_integrity_status = "Verified"
-    window.config.recipe_validation_status = "Validated"
-    window.config.material_code = "MAT-001"
-    window.config.operator_name = "OP-01"
     assert window._production_preflight_errors() == []
     window.close()
     app.processEvents()

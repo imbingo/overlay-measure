@@ -50,13 +50,17 @@ def _draw_roi(canvas: np.ndarray, roi: Roi, label: str) -> None:
 
 
 def _draw_detection(canvas: np.ndarray, detection: DetectionResult, label: str) -> None:
+    if not (np.isfinite(detection.center_x_px) and np.isfinite(detection.center_y_px)):
+        return
     center = (int(round(detection.center_x_px)), int(round(detection.center_y_px)))
     thickness = max(2, int(round(min(canvas.shape[:2]) / 600.0)))
     mode = detection.fitting_mode
     params = detection.shape_params
-    if mode in {"Circle", "EdgeCenter", "CaliperCircle"}:
-        radius = max(1, int(round(float(params.get("radius_px", detection.diameter_px / 2.0)))))
-        cv2.circle(canvas, center, radius, FIT_COLOR, thickness, cv2.LINE_AA)
+    if mode in {"Circle", "EdgeCenter", "CaliperCircle", "ProductionCircle", "AutoCircle"}:
+        raw_radius = float(params.get("radius_px", detection.diameter_px / 2.0))
+        if np.isfinite(raw_radius) and raw_radius > 0:
+            radius = max(1, int(round(raw_radius)))
+            cv2.circle(canvas, center, radius, FIT_COLOR, thickness, cv2.LINE_AA)
     elif mode == "Ellipse":
         major = max(1, int(round(float(params.get("major_px", detection.diameter_px)) / 2.0)))
         minor = max(1, int(round(float(params.get("minor_px", detection.diameter_px)) / 2.0)))

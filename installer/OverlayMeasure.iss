@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "2.6.5"
+  #define AppVersion "2.6.6"
 #endif
 
 #define AppName "SOMA Vision Metrology"
@@ -50,7 +50,4 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
-
-[UninstallDelete]
-Type: filesandordirs; Name: "{app}"
+Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent runasoriginaluser

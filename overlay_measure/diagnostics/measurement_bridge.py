@@ -150,13 +150,17 @@ def align_measurement(snapshot, upper_key, lower_key, turns=0):
 
     bp = b_physical(b.edge_points)
 
-    # Gaps are bounded by observed spacing; do not bridge rejected edge sectors.
+    # Gaps are bounded by observed spacing; do not bridge rejected edge sectors,
+    # while allowing valid coarse-caliper circles (< 30 calipers) to connect.
     def gap(points, center):
         v = points - center
         t = np.sort(np.mod(np.degrees(np.arctan2(v[:, 1], v[:, 0])), 360))
         spacing = np.diff(np.r_[t, t[0] + 360])
         spacing = spacing[spacing > 1e-7]
-        return min(12.0, max(1e-6, float(np.median(spacing)) * 1.5))
+        if len(spacing) == 0:
+            return 12.0
+        nominal_cap = min(45.0, max(12.0, (360.0 / max(len(points), 1)) * 1.6))
+        return min(nominal_cap, max(1e-6, float(np.median(spacing)) * 1.5))
 
     comp = compare_edges(
         ap, bp, ca, ca, max_gap_a_deg=gap(ap, ca), max_gap_b_deg=gap(bp, ca)
@@ -192,7 +196,11 @@ def align_measurement(snapshot, upper_key, lower_key, turns=0):
         warnings.append(
             "主页面批量记录保存的是抽样轮廓，仅供预览；完整诊断请在主页面对当前图像重新识别。"
         )
-    if any(d.shape_params.get("measurement_eligible") is False for d in (a, b)):
+    if any(
+        d.shape_params.get("measurement_eligible") is False
+        or d.shape_params.get("quality_status") == "Invalid"
+        for d in (a, b)
+    ):
         reliable = False
         warnings.append("主页面轮廓未通过质量门槛，仅供诊断查看，不作量测结论。")
     if comp.metrics["coverage"] < 0.7:
@@ -284,8 +292,21 @@ def export_measurement(snapshot, upper_key, lower_key, directory):
         valid_intervals_deg=c.valid_intervals_deg,
         point_policy="original main-page points, never refitted",
     )
+    def _clean_json(obj):
+        if isinstance(obj, float):
+            return obj if np.isfinite(obj) else None
+        if isinstance(obj, np.ndarray):
+            return _clean_json(obj.tolist())
+        if isinstance(obj, np.generic):
+            return _clean_json(obj.item())
+        if isinstance(obj, dict):
+            return {k: _clean_json(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_clean_json(v) for v in obj]
+        return obj
+
     (out / "session.json").write_text(
-        json.dumps(manifest, default=json_value, ensure_ascii=False, indent=2),
+        json.dumps(_clean_json(manifest), default=json_value, ensure_ascii=False, indent=2, allow_nan=False),
         encoding="utf-8",
     )
     export_curve_png(c, out / "edge_displacement.png", r.reliable)

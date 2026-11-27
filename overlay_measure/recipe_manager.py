@@ -90,18 +90,38 @@ def save_recipe(
             for m in marks
         ],
     }
-    Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    import os
+    import tempfile
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{target.stem}_", suffix=".tmp", dir=str(target.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(payload)
+        os.replace(tmp_name, target)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
-def load_recipe(path: str):
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    config = MeasurementConfig(**data.get("measurement_config", {}))
-    params_data = data.get("detection_params", {})
+def _filter_dataclass_fields(cls, raw: dict) -> dict:
+    from dataclasses import fields
+    allowed = {field.name for field in fields(cls)}
+    return {key: value for key, value in (raw or {}).items() if key in allowed}
+
+
+def parse_recipe_data(data: dict):
+    config = MeasurementConfig(**_filter_dataclass_fields(MeasurementConfig, data.get("measurement_config", {})))
+    params_data = dict(data.get("detection_params", {}) or {})
     if "upper_fitting_mode" not in params_data and "fitting_mode" in params_data:
         params_data["upper_fitting_mode"] = params_data["fitting_mode"]
     if "lower_fitting_mode" not in params_data and "fitting_mode" in params_data:
         params_data["lower_fitting_mode"] = params_data["fitting_mode"]
-    params = DetectionParams(**params_data)
+    params = DetectionParams(**_filter_dataclass_fields(DetectionParams, params_data))
     marks = []
     roi_fit_policy = data.get("roi_fit_policy", "legacy")
     for item in data.get("marks", []):
@@ -129,6 +149,16 @@ def load_recipe(path: str):
                 target_contour_id=str(item.get("target_contour_id", "")),
             )
         )
+    return config, params, marks, GeometryProgram.from_dict(data.get("geometry_program"))
+
+
+def load_recipe_with_geometry_bytes(raw_bytes: bytes):
+    data = json.loads(raw_bytes.decode("utf-8"))
+    return parse_recipe_data(data)
+
+
+def load_recipe(path: str):
+    config, params, marks, _ = load_recipe_with_geometry(path)
     return config, params, marks
 
 
@@ -138,6 +168,4 @@ def load_recipe_with_geometry(path: str):
     ``load_recipe`` remains unchanged for integrations built against V1.x.
     New UI code uses this helper to read the optional V2 geometry program.
     """
-    config, params, marks = load_recipe(path)
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return config, params, marks, GeometryProgram.from_dict(data.get("geometry_program"))
+    return load_recipe_with_geometry_bytes(Path(path).read_bytes())

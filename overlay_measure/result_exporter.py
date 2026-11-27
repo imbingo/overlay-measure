@@ -342,10 +342,71 @@ def _style_sheet(ws, fail_columns: Optional[List[str]] = None):
             cell.alignment = Alignment(vertical="center")
         for idx in fail_indexes:
             value = row[idx - 1].value
-            if value in {"失败", "异常", "无效", "NG"} or (isinstance(value, str) and "超限" in value):
+            if value in {"失败", "异常", "无效", "NG", "不通过"} or (isinstance(value, str) and "超限" in value):
                 row[idx - 1].fill = fail_fill
                 row[idx - 1].font = fail_font
     _autosize(ws)
+
+
+def _sanitize_spreadsheet_cell(value):
+    """Prevent CSV/Excel formula injection on untrusted string cells."""
+    if not isinstance(value, str) or not value:
+        return value
+    stripped = value.lstrip()
+    if stripped and stripped[0] in ("=", "+", "-", "@", "\t", "\r"):
+        # Preserve legitimate signed numbers (e.g. "-1.234", "+0.500") and plain dash placeholders.
+        if stripped in {"-", "--", "—"}:
+            return value
+        try:
+            float(stripped)
+            return value
+        except ValueError:
+            return "'" + value
+    return value
+
+
+def _sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    out = df.copy()
+    for col in out.columns:
+        if out[col].dtype == object:
+            out[col] = out[col].map(_sanitize_spreadsheet_cell)
+    return out
+
+
+def _safe_sheet_name(name: str, used: set[str]) -> str:
+    import re
+    clean = re.sub(r"[:\\/?*\[\]]", "_", str(name or "Sheet")).strip() or "Sheet"
+    base = clean[:31]
+    candidate = base
+    idx = 1
+    while candidate in used:
+        suffix = f"_{idx}"
+        candidate = base[: 31 - len(suffix)] + suffix
+        idx += 1
+    used.add(candidate)
+    return candidate
+
+
+def _safe_filename_part(name: str) -> str:
+    import re
+    clean = re.sub(r"[<>:\"/\\|?*\x00-\x1f]", "_", str(name or "table")).strip(" .")
+    clean = clean.replace("..", "_")
+    return clean[:120] or "table"
+
+
+def _round_detail_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    high_precision_cols = {"像素尺寸X(μm/px)", "像素尺寸Y(μm/px)"}
+    ratio_cols = {"置信度", "有效点覆盖率", "角度覆盖率", "异常点比例", "形状纵横比"}
+    out = df.copy()
+    for col in out.columns:
+        if pd.api.types.is_numeric_dtype(out[col]):
+            digits = 6 if col in high_precision_cols else (4 if col in ratio_cols else 3)
+            out[col] = out[col].round(digits)
+    return out
 
 
 def export_data_tables(path: str, tables: dict[str, list[dict]]) -> None:
@@ -354,16 +415,43 @@ def export_data_tables(path: str, tables: dict[str, list[dict]]) -> None:
     XLSX contains all tables. CSV path denotes a directory with one UTF-8 BOM
     CSV per table, avoiding silent loss of point/angle/traceability tables.
     """
+    import os
+    import tempfile
     target = Path(path)
     if target.suffix.lower() == '.xlsx':
-        with pd.ExcelWriter(target, engine='openpyxl') as writer:
-            for name, rows in tables.items():
-                pd.DataFrame(rows).to_excel(writer, index=False, sheet_name=name[:31])
-                _style_sheet(writer.book[name[:31]])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{target.stem}_", suffix=".xlsx", dir=str(target.parent))
+        os.close(fd)
+        try:
+            used_sheets: set[str] = set()
+            with pd.ExcelWriter(tmp_name, engine='openpyxl') as writer:
+                for name, rows in tables.items():
+                    sheet = _safe_sheet_name(name, used_sheets)
+                    _sanitize_dataframe(pd.DataFrame(rows)).to_excel(writer, index=False, sheet_name=sheet)
+                    _style_sheet(writer.book[sheet])
+            os.replace(tmp_name, target)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
     else:
         target.mkdir(parents=True, exist_ok=True)
         for name, rows in tables.items():
-            pd.DataFrame(rows).to_csv(target / f'{name}.csv', index=False, encoding='utf-8-sig')
+            safe_name = _safe_filename_part(name)
+            csv_target = target / f'{safe_name}.csv'
+            fd, tmp_name = tempfile.mkstemp(prefix=f".{safe_name}_", suffix=".csv", dir=str(target))
+            os.close(fd)
+            try:
+                _sanitize_dataframe(pd.DataFrame(rows)).to_csv(tmp_name, index=False, encoding='utf-8-sig')
+                os.replace(tmp_name, csv_target)
+            except Exception:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
 
 
 def resize_dimensions_preserving_aspect(width: float, height: float, max_width: float, max_height: float) -> tuple[int, int]:
@@ -381,21 +469,34 @@ def export_results(
     traceability_info: Optional[dict] = None,
     geometry_rows: Optional[List[dict]] = None,
 ) -> None:
+    import os
+    import tempfile
     detail_df = pd.DataFrame(rows).drop(columns=["roundness_um"], errors="ignore").rename(columns=DETAIL_COLUMNS)
     summary_df = pd.DataFrame(summary_rows or [])
     repeatability_df = pd.DataFrame(repeatability_rows or [])
     geometry_df = pd.DataFrame(geometry_rows or [])
-    # Keep exported measurement results concise for production review.
-    # Internal calculation remains full precision; only output tables are rounded.
-    detail_df = detail_df.round(3)
-    summary_df = summary_df.round(3)
-    repeatability_df = repeatability_df.round(3)
-    geometry_df = geometry_df.round(3)
-    ext = Path(path).suffix.lower()
+    # Keep exported measurement results concise while preserving calibration precision.
+    detail_df = _sanitize_dataframe(_round_detail_dataframe(detail_df))
+    summary_df = _sanitize_dataframe(summary_df.round(3))
+    repeatability_df = _sanitize_dataframe(repeatability_df.round(3))
+    geometry_df = _sanitize_dataframe(geometry_df.round(3))
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    ext = target.suffix.lower()
     if ext != ".xlsx":
         # CSV can contain only one table, so export the concise summary when available.
         df = summary_df if not summary_df.empty else detail_df
-        df.to_csv(path, index=False, encoding="utf-8-sig")
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{target.stem}_", suffix=ext or ".csv", dir=str(target.parent))
+        os.close(fd)
+        try:
+            df.to_csv(tmp_name, index=False, encoding="utf-8-sig")
+            os.replace(tmp_name, target)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
         return
 
     info_rows = []
@@ -441,43 +542,53 @@ def export_results(
             {"项目": "配方SHA256", "内容": traceability_info.get("recipe_hash", "")},
             {"项目": "追溯档案路径", "内容": traceability_info.get("archive_path", "")},
         ])
-    info_df = pd.DataFrame(info_rows).round(3)
+    info_df = _sanitize_dataframe(pd.DataFrame(info_rows))
 
-    with TemporaryDirectory() as tmp_dir:
-        with pd.ExcelWriter(path, engine="openpyxl") as writer:
-            info_df.to_excel(writer, index=False, sheet_name="基础信息")
-            summary_df.to_excel(writer, index=False, sheet_name="结果汇总")
-            if not repeatability_df.empty:
-                repeatability_df.to_excel(writer, index=False, sheet_name="多次测量结果")
-            detail_df.to_excel(writer, index=False, sheet_name="识别明细")
-            if not geometry_df.empty:
-                geometry_df.to_excel(writer, index=False, sheet_name="尺寸结果")
+    fd, tmp_xlsx = tempfile.mkstemp(prefix=f".{target.stem}_", suffix=".xlsx", dir=str(target.parent))
+    os.close(fd)
+    try:
+        with TemporaryDirectory() as tmp_dir:
+            with pd.ExcelWriter(tmp_xlsx, engine="openpyxl") as writer:
+                info_df.to_excel(writer, index=False, sheet_name="基础信息")
+                summary_df.to_excel(writer, index=False, sheet_name="结果汇总")
+                if not repeatability_df.empty:
+                    repeatability_df.to_excel(writer, index=False, sheet_name="多次测量结果")
+                detail_df.to_excel(writer, index=False, sheet_name="识别明细")
+                if not geometry_df.empty:
+                    geometry_df.to_excel(writer, index=False, sheet_name="尺寸结果")
 
-            sheet_names = ["基础信息", "结果汇总"]
-            if not repeatability_df.empty:
-                sheet_names.append("多次测量结果")
-            sheet_names.append("识别明细")
-            if not geometry_df.empty:
-                sheet_names.append("尺寸结果")
-            for sheet_name in sheet_names:
-                ws = writer.book[sheet_name]
-                _style_sheet(ws, fail_columns=["结果", "判定", "提示"])
+                sheet_names = ["基础信息", "结果汇总"]
+                if not repeatability_df.empty:
+                    sheet_names.append("多次测量结果")
+                sheet_names.append("识别明细")
+                if not geometry_df.empty:
+                    sheet_names.append("尺寸结果")
+                for sheet_name in sheet_names:
+                    ws = writer.book[sheet_name]
+                    _style_sheet(ws, fail_columns=["结果", "判定", "提示"])
 
-            if mark_images:
-                ws = writer.book.create_sheet("图像工作区")
-                ws["A1"] = "标记"
-                ws["B1"] = "层"
-                ws["C1"] = "完整图像与识别叠加"
-                ws["D1"] = "说明"
-                _style_sheet(ws)
-                for idx, item in enumerate(mark_images, start=2):
-                    ws.cell(idx, 1, item.get("mark_id", ""))
-                    ws.cell(idx, 2, item.get("layer", ""))
-                    ws.cell(idx, 4, item.get("note", ""))
-                    image_path = item.get("path")
-                    if image_path and Path(image_path).exists():
-                        img = XlsxImage(str(image_path))
-                        img.width, img.height = resize_dimensions_preserving_aspect(img.width, img.height, 720.0, 480.0)
-                        ws.add_image(img, f"C{idx}")
-                        ws.row_dimensions[idx].height = max(60, img.height * 0.75 + 10)
-                ws.column_dimensions["C"].width = 96
+                if mark_images:
+                    ws = writer.book.create_sheet("图像工作区")
+                    ws["A1"] = "标记"
+                    ws["B1"] = "层"
+                    ws["C1"] = "完整图像与识别叠加"
+                    ws["D1"] = "说明"
+                    _style_sheet(ws)
+                    for idx, item in enumerate(mark_images, start=2):
+                        ws.cell(idx, 1, _sanitize_spreadsheet_cell(item.get("mark_id", "")))
+                        ws.cell(idx, 2, _sanitize_spreadsheet_cell(item.get("layer", "")))
+                        ws.cell(idx, 4, _sanitize_spreadsheet_cell(item.get("note", "")))
+                        image_path = item.get("path")
+                        if image_path and Path(image_path).exists():
+                            img = XlsxImage(str(image_path))
+                            img.width, img.height = resize_dimensions_preserving_aspect(img.width, img.height, 720.0, 480.0)
+                            ws.add_image(img, f"C{idx}")
+                            ws.row_dimensions[idx].height = max(60, img.height * 0.75 + 10)
+                    ws.column_dimensions["C"].width = 96
+        os.replace(tmp_xlsx, target)
+    except Exception:
+        try:
+            os.unlink(tmp_xlsx)
+        except OSError:
+            pass
+        raise

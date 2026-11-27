@@ -54,7 +54,12 @@ def refine_circle_candidate(
         float(config.production_caliper_width_px),
         "Inner to Outer",
     )
-    precise = detect_caliper_circle(gray, roi, params)
+    precise = detect_caliper_circle(
+        gray,
+        roi,
+        params,
+        pixel_scale=(config.pixel_size_x_um, config.pixel_size_y_um),
+    )
     contour_metrics = contour_ellipse_metrics_um(precise.edge_points, config)
     count = max(1, int(config.production_caliper_count))
     found_count = len(precise.edge_points) + len(precise.rejected_points)
@@ -86,7 +91,7 @@ def refine_circle_candidate(
         center_x_px=precise.center_x_px,
         center_y_px=precise.center_y_px,
         center_x_um=precise.center_x_px * config.pixel_size_x_um,
-        center_y_um=precise.center_y_px * config.pixel_size_y_um,
+        center_y_um=(float(gray.shape[0]) - precise.center_y_px) * config.pixel_size_y_um,
         diameter_px=2.0 * precise.radius_px,
         diameter_um=diameter_um,
         residual_px=precise.residual_px,
@@ -272,7 +277,7 @@ def refine_rectangle_candidate(
         center_x_px=fit.center_x_px,
         center_y_px=fit.center_y_px,
         center_x_um=fit.center_x_px * config.pixel_size_x_um,
-        center_y_um=fit.center_y_px * config.pixel_size_y_um,
+        center_y_um=(float(gray.shape[0]) - fit.center_y_px) * config.pixel_size_y_um,
         diameter_px=fit.diameter_px,
         diameter_um=0.5 * (width_um + height_um),
         residual_px=fit.residual_px,
@@ -355,14 +360,20 @@ def refine_candidate(
                 params,
                 config,
             )
+            inferred_shape = (
+                "Rectangle"
+                if measured.fitting_mode == "Rectangle" or roi_type in {"Rectangle", "Rectangular Ring"}
+                else "Circle"
+            )
             measured.shape_params.update({
                 "measurement_stage": "automatic_roi_semantic_refine",
                 "roi_type": roi_type,
+                "shape_type": measured.shape_params.get("shape_type") or inferred_shape,
                 "candidate_mode": candidate.fitting_mode,
                 "candidate_contour_points": candidate.shape_params.get("contour_points", candidate.edge_points),
             })
             return attach_algorithm_path(measured, "Auto")
-        if candidate.fitting_mode == "AutoRectangle":
+        if roi_type == "Rectangle" or candidate.fitting_mode == "AutoRectangle":
             return refine_rectangle_candidate(gray, candidate, params, config)
         return refine_circle_candidate(gray, candidate, params, config)
     except Exception as exc:

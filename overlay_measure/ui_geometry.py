@@ -474,6 +474,8 @@ class MainWindowGeometryMixin:
             self._refresh_geometry_canvas_context()
 
     def delete_geometry_item(self, identifier: str):
+        if getattr(self, "_calculation_running", False):
+            return
         identifier = str(identifier or "")
         if not identifier:
             return
@@ -481,6 +483,13 @@ class MainWindowGeometryMixin:
         self.geometry_program.measurements = [item for item in self.geometry_program.measurements if item.measurement_id != identifier]
         self.geometry_program.coordinate_labels = [item for item in self.geometry_program.coordinate_labels if item.label_id != identifier]
         self.geometry_program.coordinate_systems = [item for item in self.geometry_program.coordinate_systems if item.coordinate_id != identifier]
+        for batch_res in getattr(self, "batch_geometry_results", []):
+            batch_res.features.pop(identifier, None)
+            batch_res.measurements.pop(identifier, None)
+            batch_res.coordinate_labels.pop(identifier, None)
+            batch_res.coordinate_systems.pop(identifier, None)
+        if hasattr(self, "_mark_recipe_dirty"):
+            self._mark_recipe_dirty("几何程序已修改")
         self._refresh_geometry_results()
 
     def _finish_geometry_interaction(self, interaction: dict):
