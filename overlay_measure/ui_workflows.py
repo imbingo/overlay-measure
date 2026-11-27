@@ -197,7 +197,7 @@ class MainWindowWorkflowMixin:
             from .parameter_comparison import available_rois
             from .ui_parameter_comparison import ParameterComparisonDialog
             if not available_rois(self):
-                QMessageBox.information(self, "调参对比", "首版支持已创建的卡尺圆 ROI。请先导入图像并创建卡尺圆 ROI。")
+                QMessageBox.information(self, "调参对比", "请先导入图像并创建手动 ROI。")
                 return
             dialog = getattr(self, "_parameter_comparison_dialog", None)
             if dialog is not None and not dialog._closing:

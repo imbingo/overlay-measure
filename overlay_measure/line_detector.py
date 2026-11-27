@@ -43,8 +43,12 @@ def detect_approximate_line(
     roi: Roi,
     params: DetectionParams,
     config: MeasurementConfig,
+    diagnostics: list | None = None,
 ) -> DetectionResult:
-    """Find one subpixel edge in each normal profile of an oriented line ROI."""
+    """Find one subpixel edge in each normal profile of an oriented line ROI.
+
+    ``diagnostics`` (optional) receives one record per normal profile.
+    """
     r = roi.normalized()
     if r.w < 8.0 or r.h < 4.0:
         raise ValueError("近似直线 ROI 太小，请沿目标直线拉长并增加搜索带宽")
@@ -71,6 +75,20 @@ def detect_approximate_line(
             positions = base[None, :] + normal_offsets[:, None] * normal[None, :]
             profile_rows.append(_sample_bilinear(blurred, positions[:, 0], positions[:, 1]))
         profile = np.nanmean(np.asarray(profile_rows), axis=0)
+        record = None
+        if diagnostics is not None:
+            start = center + along * along_offset + normal * normal_offsets[0]
+            record = {
+                "kind": "normal", "window_index": len(diagnostics), "start": start,
+                "search_vector": normal.copy(), "tangent": along.copy(),
+                "tangent_offsets": np.asarray(average_offsets, dtype=np.float64),
+                "radial_samples": normal_offsets - normal_offsets[0],
+                "profile": np.asarray(profile, dtype=np.float32),
+                "gradient": np.gradient(profile, step) if len(profile) >= 2 else np.empty(0),
+                "selected": None, "selected_distance_px": None, "status": "outside_image",
+                "inlier": False, "ransac_used": False, "fit_error_px": None, "fit_threshold_px": None,
+            }
+            diagnostics.append(record)
         if not np.isfinite(profile).all() or len(profile) < 5:
             continue
         gradient = np.gradient(profile, step)
@@ -83,9 +101,15 @@ def detect_approximate_line(
         index = int(np.argmax(score))
         strength = float(score[index])
         if strength < float(params.min_gradient) or index <= 0 or index >= len(score) - 1:
+            if record is not None:
+                record["status"] = "below_gradient_threshold" if strength < float(params.min_gradient) else "no_peak"
             continue
         offset = normal_offsets[index] + _peak_offset(score[index - 1], score[index], score[index + 1]) * step
         point = center + along * along_offset + normal * offset
+        if record is not None:
+            record["selected"] = {"x": float(point[0]), "y": float(point[1]), "gradient": strength}
+            record["selected_distance_px"] = float(offset - normal_offsets[0])
+            record["status"] = "pending_fit"
         points.append(point)
         strengths.append(strength)
     if len(points) < max(6, min(int(params.min_edge_points), sample_count) // 4):

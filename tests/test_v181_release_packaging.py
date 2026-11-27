@@ -35,8 +35,8 @@ def test_release_metadata_contains_hash_and_full_installer_policy(tmp_path):
     manifest = tmp_path / "update_manifest.json"
     version_info = tmp_path / "version_info.txt"
 
-    # V2.6.6 unifies Y-up physical coordinates, lower-minus-upper overlay, and metrology/UI safety fixes.
-    assert version_tuple(__version__) == (2, 6, 6, 0)
+    # V2.6.7 extends parameter comparison to all manual ROI types and Canny/profile/polarity parameters.
+    assert version_tuple(__version__) == (2, 6, 7, 0)
     write_version_info(version_info, __version__)
     write_manifest(manifest, artifact, __version__)
 

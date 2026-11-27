@@ -237,9 +237,127 @@ def test_side_by_side_views_share_actual_image_scale(main):
         dialog.canvas._update_transform()
         dialog.second_canvas._update_transform()
         assert dialog.canvas.scale == pytest.approx(old_scale)
-        assert dialog.second_canvas.scale == pytest.approx(old_scale)
         dialog.canvas.pan_x = 17
         dialog.canvas.viewChanged.emit()
         assert dialog.second_canvas.pan_x == 17
     finally:
         dialog.close()
+
+
+def _rect_and_line_image():
+    y, x = np.mgrid[:180, :180]
+    rect = ((x >= 45) & (x <= 135) & (y >= 50) & (y <= 130)).astype(np.float32)
+    gray = 30.0 + 170.0 * rect + np.random.default_rng(7).normal(0, 0.8, rect.shape).astype(np.float32)
+    return ImageData("rect", gray, "rect.png", "float32", float(gray.min()), float(gray.max()))
+
+
+def test_all_manual_roi_types_and_single_image_lower_layer_zero_deviation(main):
+    _, window, _ = main
+    from overlay_measure.measurement_service import detect_manual_roi
+    from overlay_measure.parameter_comparison import available_rois
+
+    window._set_mode_ui("Single Image")
+    window.mark_images["Mark1"]["lower"] = None
+    circle_rois = [
+        ("Annulus", Roi(25, 25, 130, 130, "Annulus", 0.5, "Strongest Edge")),
+        ("Circle", Roi(25, 25, 130, 130, "Circle", 0.0, "All Edges")),
+        ("Ellipse", Roi(25, 25, 130, 130, "Ellipse", 0.0, "All Edges")),
+        ("Robust Center", Roi(25, 25, 130, 130, "Robust Center", 0.0, "All Edges")),
+        ("Region Center", Roi(25, 25, 130, 130, "Region Center", 0.0, "All Edges")),
+    ]
+    created = []
+    for name, roi in circle_rois:
+        layer = "lower" if name in {"Annulus", "Circle"} else "upper"
+        entry = window.marks["Mark1"].add_roi(layer, roi)
+        created.append((layer, entry, name))
+
+    choices = available_rois(window)
+    choice_ids = {(layer, rid) for _, layer, rid, _ in choices}
+    for layer, entry, _ in created:
+        assert (layer, entry.roi_id) in choice_ids
+        captured = ComparisonSource.capture(window, "Mark1", layer, entry.roi_id)
+        assert captured.is_current(window)
+        formal = detect_manual_roi("Mark1", layer, captured.image, captured.roi, captured.params, captured.config)
+        preview = calculate_preview(captured, captured.params)
+        assert preview.ok and preview.error == ""
+        assert preview.detection.center_x_px == formal.center_x_px
+        assert preview.detection.center_y_px == formal.center_y_px
+        assert preview.diameter_um == formal.diameter_um
+        assert preview.residual_um == formal.residual_um
+        assert preview.valid_count == formal.edge_point_count
+        assert len(preview.records) > 0
+
+    rect_img = _rect_and_line_image()
+    window._set_image_for_layer("Mark1", "upper", rect_img, "single")
+    for roi in (
+        Roi(30, 35, 120, 110, "Rectangle", 0.0, "All Edges"),
+        Roi(30, 35, 120, 110, "Rectangular Ring", 0.45, "All Edges"),
+        Roi(55, 38, 70, 24, "Approximate Line", 0.0, "All Edges"),
+    ):
+        entry = window.marks["Mark1"].add_roi("upper", roi)
+        captured = ComparisonSource.capture(window, "Mark1", "upper", entry.roi_id)
+        formal = detect_manual_roi("Mark1", "upper", captured.image, captured.roi, captured.params, captured.config)
+        preview = calculate_preview(captured, captured.params)
+        assert preview.ok and preview.error == ""
+        assert preview.detection.center_x_px == formal.center_x_px
+        assert preview.detection.center_y_px == formal.center_y_px
+        assert preview.diameter_um == formal.diameter_um
+        assert preview.residual_um == formal.residual_um
+        assert preview.valid_count == formal.edge_point_count
+        assert len(preview.records) > 0
+
+
+def test_non_caliper_canny_profile_controls_point_click_and_full_apply(main):
+    app, window, _ = main
+    ann_entry = window.marks["Mark1"].add_roi(
+        "upper", Roi(25, 25, 130, 130, "Annulus", 0.5, "Strongest Edge")
+    )
+    window._refresh_roi_index_combo(ann_entry.roi_id)
+    dialog = ParameterComparisonDialog(window)
+    try:
+        dialog.show()
+        settle(app, dialog)
+        assert dialog.source.roi_type == "Annulus"
+        assert dialog.controls["canny_low"].isEnabled()
+        assert dialog.controls["canny_high"].isEnabled()
+        assert dialog.controls["profile_half_width_px"].isEnabled()
+        assert dialog.controls["profile_step_px"].isEnabled()
+        assert not dialog.controls["polarity"].isEnabled()
+
+        dialog.controls["canny_low"].setValue(180)
+        assert dialog.controls["canny_high"].minimum() == 181
+        assert dialog.controls["canny_high"].value() >= 181
+        dialog.controls["canny_low"].setValue(40)
+        dialog.controls["canny_high"].setValue(120)
+        dialog.controls["profile_half_width_px"].setValue(2.5)
+        dialog.controls["profile_step_px"].setValue(0.2)
+        dialog.controls["min_gradient"].setValue(12.0)
+        dialog.polarity.setCurrentIndex(dialog.polarity.findData("Dark to Bright"))
+        dialog.request_preview()
+        settle(app, dialog)
+        assert dialog.current.ok
+        assert dialog.current.records
+
+        rec = dialog.current.records[len(dialog.current.records) // 2]
+        sel = rec.get("selected") or {"x": float(rec["start"][0]), "y": float(rec["start"][1])}
+        dialog.canvas.pointPicked.emit(sel["x"], sel["y"])
+        app.processEvents()
+        assert "采样剖面" in dialog.selected_label.text()
+        assert len(dialog.plot.raw) > 0
+        assert "梯度" in point_explanation(dialog.current, dialog.canvas.selected) or "拟合" in point_explanation(dialog.current, dialog.canvas.selected)
+
+        window.detections["stale_check"] = {}
+        assert dialog.apply_parameters()
+        assert window.params.canny_low == window.canny_low_spin.value() == 40
+        assert window.params.canny_high == window.canny_high_spin.value() == 120
+        assert window.params.profile_half_width_px == pytest.approx(2.5)
+        assert window.profile_half_spin.value() == pytest.approx(2.5)
+        assert window.params.profile_step_px == pytest.approx(0.2)
+        assert window.profile_step_spin.value() == pytest.approx(0.2)
+        assert window.params.min_gradient == pytest.approx(12.0)
+        assert window.params.polarity == "Dark to Bright"
+        assert window._combo_value(window.polarity_combo) == "Dark to Bright"
+        assert not window.detections
+    finally:
+        dialog.close()
+

@@ -1,4 +1,4 @@
-"""Interactive, isolated parameter comparison for one production caliper ROI."""
+"""Interactive, isolated parameter comparison for all manual ROI types."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -10,22 +10,28 @@ from PySide6.QtCore import QPointF, QRectF, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout,
-    QHeaderView, QLabel, QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QHeaderView, QLabel, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+    QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from . import __version__
 from .parameter_comparison import (
-    ComparisonSource, TUNABLE_FIELDS, available_rois, calculate_preview,
-    point_explanation, raw_profile,
+    APPLICABILITY, ComparisonSource, TUNABLE_FIELDS, available_rois,
+    calculate_preview, nearest_record, point_explanation, raw_profile,
+    roi_label,
 )
 from .theme import ui_color
 from .ui_components import ImageCanvas
 
-CYAN, AMBER, RED = "#67c5d8", "#e8b45a", "#ff6b6b"
-STATUS = {"valid": "保留", "fit_rejected": "剔除", "not_fitted": "未拟合",
-          "outside_image": "采样越界", "no_peak": "无梯度峰",
-          "below_gradient_threshold": "低于梯度门槛", "pending_fit": "待拟合"}
+CYAN, AMBER, RED, GRAY = "#67c5d8", "#e8b45a", "#ff6b6b", "#9a9a9f"
+STATUS = {
+    "valid": "保留", "fit_rejected": "RANSAC 剔除", "not_fitted": "未拟合",
+    "outside_image": "采样越界", "no_peak": "无梯度峰",
+    "below_gradient_threshold": "低于梯度门槛", "outside_roi_mask": "掩膜外筛除",
+    "target_edge_filtered": "边界策略过滤", "pending_fit": "待拟合",
+}
+POLARITY_ITEMS = (("自动", "Auto"), ("暗到亮", "Dark to Bright"), ("亮到暗", "Bright to Dark"))
+POLARITY_LABELS = {v: k for k, v in POLARITY_ITEMS}
 
 
 class PreviewWorker(QThread):
@@ -42,7 +48,7 @@ class PreviewWorker(QThread):
             if self.isInterruptionRequested():
                 return True
             if time.monotonic() >= deadline:
-                raise TimeoutError("预览计算超时，请缩小 ROI 或减少卡尺采样范围")
+                raise TimeoutError("预览计算超时，请缩小 ROI 或减少采样范围")
             return False
         try:
             baseline = calculate_preview(self.source, self.source.params, cancelled) if self.needs_baseline else None
@@ -55,11 +61,22 @@ class PreviewWorker(QThread):
             pass
         except Exception as exc:
             from .parameter_comparison import ComparisonResult
-            self.completed.emit(self.revision, None, ComparisonResult(self.params, [], None, str(exc)))
+            self.completed.emit(self.revision, None,
+                                ComparisonResult(self.params, [], None, str(exc), roi_type=self.source.roi_type))
+
+
+def _record_anchor(r):
+    sel = r.get("selected")
+    if sel:
+        return float(sel["x"]), float(sel["y"])
+    end = float(r["radial_samples"][-1]) if len(r["radial_samples"]) else 0.0
+    xy = r["start"] + r["search_vector"] * end * 0.5
+    return float(xy[0]), float(xy[1])
 
 
 class ComparisonCanvas(ImageCanvas):
     caliperSelected = Signal(int)
+    pointPicked = Signal(float, float)
     viewChanged = Signal()
 
     def __init__(self):
@@ -69,6 +86,7 @@ class ComparisonCanvas(ImageCanvas):
         self.setMinimumSize(250, 180)
         self.source = self.baseline = self.current = None
         self.selected = 0
+        self.selected_pair = (0, 0)
         self.kind = "overlay"
 
     def zoom_by(self, factor, center_pos=None):
@@ -89,13 +107,21 @@ class ComparisonCanvas(ImageCanvas):
         if event.button() == Qt.LeftButton and not self.space_pan_held and self.source:
             point = self.widget_to_image_float(event.position().toPoint())
             if point is not None:
-                cx, cy = self.source.roi.normalized().center()
-                angle = np.arctan2(point[1] - cy, point[0] - cx) % (2 * np.pi)
-                count = int(np.clip(self.source.roi.caliper_count, 4, 720))
-                self.caliperSelected.emit(int(np.floor(angle / (2 * np.pi) * count + 0.5)) % count)
+                if self.source.roi_type == "Caliper Circle":
+                    cx, cy = self.source.roi.normalized().center()
+                    angle = np.arctan2(point[1] - cy, point[0] - cx) % (2 * np.pi)
+                    count = int(np.clip(self.source.roi.caliper_count, 4, 720))
+                    self.caliperSelected.emit(int(np.floor(angle / (2 * np.pi) * count + 0.5)) % count)
+                else:
+                    self.pointPicked.emit(float(point[0]), float(point[1]))
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def _active_result_and_index(self):
+        if self.kind == "baseline":
+            return self.baseline, self.selected if (self.source and self.source.roi_type == "Caliper Circle") else self.selected_pair[0]
+        return self.current or self.baseline, self.selected if (self.source and self.source.roi_type == "Caliper Circle") else self.selected_pair[1]
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -118,54 +144,61 @@ class ComparisonCanvas(ImageCanvas):
                                      (self.current, AMBER, self.kind != "baseline")):
             if not result or not show:
                 continue
-            if result.circle is not None:
-                points(result.circle.edge_points, color)
-                if result is self.current:
-                    points(result.circle.rejected_points, RED, True)
+            if result.ok:
+                points(result.points, color)
+                if result is self.current and len(result.rejected):
+                    points(result.rejected, RED, True)
             else:
                 candidates = [r["selected"] for r in result.records if r.get("selected")]
-                points([(c["x"], c["y"]) for c in candidates], "#9a9a9f")
-        result = self.baseline if self.kind == "baseline" else self.current
-        if result and self.selected < len(result.records):
+                points([(c["x"], c["y"]) for c in candidates], GRAY)
+        result, index = self._active_result_and_index()
+        if result and index is not None and index < len(result.records):
             for r in result.records:
                 if r.get("selected") is None:
-                    xy = r["start"] + r["search_vector"] * float(r["radial_samples"][-1]) * 0.5
-                    wx, wy = self.image_to_widget(*xy)
-                    painter.setPen(QPen(QColor("#9a9a9f"), 1))
-                    painter.drawEllipse(QPointF(wx, wy), 3, 3)
-            record = result.records[self.selected]
-            half_width = float(self.source.roi.caliper_width_px) / 2
-            start, end = record["start"], record["start"] + record["search_vector"] * record["radial_samples"][-1]
-            corners = [start - record["tangent"] * half_width, end - record["tangent"] * half_width,
-                       end + record["tangent"] * half_width, start + record["tangent"] * half_width]
-            painter.setPen(QPen(QColor("white"), 1.2))
-            painter.drawPolygon(QPolygonF([QPointF(*self.image_to_widget(*p)) for p in corners]))
+                    wx, wy = self.image_to_widget(*_record_anchor(r))
+                    painter.setPen(QPen(QColor(GRAY), 1))
+                    painter.drawEllipse(QPointF(wx, wy), 2.5, 2.5)
+            record = result.records[index]
+            dist = float(record["radial_samples"][-1]) if len(record["radial_samples"]) else 0.0
+            start, end = record["start"], record["start"] + record["search_vector"] * dist
+            painter.setPen(QPen(QColor("white"), 1.3))
+            if result.is_caliper or len(record.get("tangent_offsets", ())) > 1:
+                half_width = float(getattr(self.source.roi, "caliper_width_px", 8.0)) / 2
+                if not result.is_caliper:
+                    half_width = float(np.max(np.abs(record["tangent_offsets"])))
+                corners = [start - record["tangent"] * half_width, end - record["tangent"] * half_width,
+                           end + record["tangent"] * half_width, start + record["tangent"] * half_width]
+                painter.drawPolygon(QPolygonF([QPointF(*self.image_to_widget(*p)) for p in corners]))
+            else:
+                painter.drawLine(QPointF(*self.image_to_widget(*start)), QPointF(*self.image_to_widget(*end)))
+                ax, ay = self.image_to_widget(*_record_anchor(record))
+                painter.drawEllipse(QPointF(ax, ay), 4, 4)
             wx, wy = self.image_to_widget(*end)
-            label = f"卡尺 {self.selected + 1}"
+            tag = "卡尺" if result.is_caliper else "剖面"
+            label = f"{tag} {index + 1}"
             label_width = painter.fontMetrics().horizontalAdvance(label) + 12
             self._draw_overlay_label(painter, int(np.clip(wx + 6, 5, max(5, self.width() - label_width))),
                                      int(np.clip(wy, 20, max(20, self.height() - 8))), label)
-            selected = record.get("selected")
-            if selected and self.width() >= 500 and self.height() >= 280:
+            cx, cy = _record_anchor(record)
+            if (record.get("selected") or not result.is_caliper) and self.width() >= 500 and self.height() >= 280:
                 frame = QRectF(self.width() - 194, self.height() - 180, 182, 168)
                 content = frame.adjusted(1, 25, -1, -1)
-                crop = QRectF(selected["x"] - 16, selected["y"] - 16, 32, 32)
+                crop = QRectF(cx - 16, cy - 16, 32, 32)
                 painter.save()
                 painter.setPen(QPen(QColor(ui_color("#D8DEE6", "border")), 1))
                 painter.setBrush(QColor(ui_color("#FFFFFF", "background")))
                 painter.drawRect(frame)
                 painter.setPen(QColor(ui_color("#20242B")))
-                painter.drawText(frame.adjusted(7, 2, -2, -140), f"局部放大 · 卡尺 {self.selected + 1}")
+                painter.drawText(frame.adjusted(7, 2, -2, -140), f"局部放大 · {label}")
                 painter.setClipRect(content)
-                # Square source pixels stay square in the magnifier.
                 side = min(content.width(), content.height())
                 target = QRectF(content.center().x() - side / 2, content.top(), side, side)
                 painter.drawPixmap(target, self.pixmap_cache, crop)
                 for preview, color, show in ((self.baseline, CYAN, self.kind != "current"),
                                              (self.current, AMBER, self.kind != "baseline")):
-                    if preview is None or preview.circle is None or not show:
+                    if preview is None or not preview.ok or not show:
                         continue
-                    for values, rejected in ((preview.circle.edge_points, False), (preview.circle.rejected_points, True)):
+                    for values, rejected in ((preview.points, False), (preview.rejected, True)):
                         if rejected and preview is not self.current:
                             continue
                         painter.setPen(QPen(QColor(RED if rejected else color), 1.5))
@@ -189,39 +222,60 @@ class ProfileComparisonPlot(QWidget):
         self.setMinimumHeight(180)
         self.source = self.baseline = self.current = None
         self.selected = 0
+        self.selected_pair = (0, 0)
         self.raw = np.empty(0)
 
+    def _idx(self, result):
+        if result is None:
+            return 0
+        if result.is_caliper or not isinstance(self.selected_pair, tuple):
+            return self.selected
+        return self.selected_pair[0 if result is self.baseline else 1]
+
     def set_data(self, source, baseline, current, selected):
-        self.source, self.baseline, self.current, self.selected = source, baseline, current, selected
+        self.source, self.baseline, self.current = source, baseline, current
+        if isinstance(selected, tuple):
+            self.selected_pair = selected
+            self.selected = selected[1] if selected[1] is not None else (selected[0] or 0)
+        else:
+            self.selected = int(selected or 0)
+            self.selected_pair = (self.selected, self.selected)
         reference = current or baseline
-        self.raw = raw_profile(source, reference.records[selected]) if reference and selected < len(reference.records) else np.empty(0)
+        ridx = self._idx(reference)
+        self.raw = raw_profile(source, reference.records[ridx]) if reference and ridx is not None and ridx < len(reference.records) else np.empty(0)
         self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.fillRect(self.rect(), QColor(ui_color("#FFFFFF", "background")))
+        reference = self.current or self.baseline
+        ridx = self._idx(reference)
+        tag = "卡尺" if (self.source is None or self.source.roi_type == "Caliper Circle") else "剖面"
+        num = (ridx or 0) + 1
         for column in range(2):
             bounds = QRectF(column * self.width() / 2 + 57, 34, self.width() / 2 - 84, self.height() - 77)
-            title = f"卡尺 {self.selected + 1} · " + ("灰度剖面（原始 / 基准 / 当前）" if column == 0 else "梯度与选峰（基准 / 当前）")
+            title = f"{tag} {num} · " + ("灰度剖面（原始 / 基准 / 当前）" if column == 0 else "梯度与选峰（基准 / 当前）")
             p.setPen(QColor(ui_color("#20242B")))
             p.drawText(QPointF(bounds.left(), 20), title)
             series, thresholds, markers = [], [], []
-            reference = self.current or self.baseline
-            if column == 0 and reference and self.selected < len(reference.records):
-                r = reference.records[self.selected]
-                series.append((np.asarray(r["radial_samples"])[:len(self.raw)], self.raw, "#9a9a9f"))
+            if column == 0 and reference and ridx is not None and ridx < len(reference.records):
+                r = reference.records[ridx]
+                series.append((np.asarray(r["radial_samples"])[:len(self.raw)], self.raw, GRAY))
             for result, color in ((self.baseline, CYAN), (self.current, AMBER)):
-                if result is None or self.selected >= len(result.records):
+                idx = self._idx(result)
+                if result is None or idx is None or idx >= len(result.records):
                     continue
-                r = result.records[self.selected]
+                r = result.records[idx]
                 y = np.asarray(r["profile"] if column == 0 else r["gradient"])
                 if column:
-                    y = y if result.params.polarity == "Dark to Bright" else -y if result.params.polarity == "Bright to Dark" else np.abs(y)
+                    use_pol = result.roi_type in {"Caliper Circle", "Approximate Line"}
+                    pol = result.params.polarity if use_pol else "Auto"
+                    y = y if pol == "Dark to Bright" else -y if pol == "Bright to Dark" else np.abs(y)
                     thresholds.append((result.params.min_gradient, color))
                 x = np.asarray(r["radial_samples"])[:len(y)]
                 series.append((x, y, color))
-                if column and r.get("selected"):
+                if column and r.get("selected") and r.get("selected_distance_px") is not None:
                     markers.append((r["selected_distance_px"], r["selected"]["gradient"], color))
             finite = [y[np.isfinite(y)] for _, y, _ in series if len(y)]
             lo = min((float(y.min()) for y in finite if len(y)), default=0)
@@ -292,6 +346,7 @@ class ParameterComparisonDialog(QDialog):
         self._closing = False
         self._initial_focus_pending = True
         self._building = True
+        self._anchor_xy = None
         self.choices = available_rois(main)
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
@@ -335,11 +390,12 @@ class ParameterComparisonDialog(QDialog):
         for canvas in (self.canvas, self.second_canvas):
             self.canvases.addWidget(canvas)
             canvas.caliperSelected.connect(self.select_caliper)
+            canvas.pointPicked.connect(self.select_nearest_point)
         self.canvas.viewChanged.connect(lambda: self.sync_view(self.canvas, self.second_canvas))
         self.second_canvas.viewChanged.connect(lambda: self.sync_view(self.second_canvas, self.canvas))
         self.second_canvas.hide()
         layout.addWidget(self.canvases, 1)
-        layout.addWidget(QLabel("点击卡尺查看灰度、梯度和取点原因；滚轮缩放，中键或空格拖动平移。"))
+        layout.addWidget(QLabel("点击卡尺或采样边缘点查看灰度、梯度和取点原因；滚轮缩放，中键或空格拖动平移。"))
         self.metrics = QTableWidget(4, 4)
         self.metrics.setObjectName("resultTable")
         self.metrics.setHorizontalHeaderLabels(["指标", "基准", "当前", "变化"])
@@ -355,17 +411,29 @@ class ParameterComparisonDialog(QDialog):
         inspector = QVBoxLayout(panel)
         inspector.setContentsMargins(12, 0, 0, 0)
         inspector.addWidget(QLabel("<b>参数预览</b>　基准 → 当前"))
+        self.path_label = QLabel("算法路径：—")
+        self.path_label.setWordWrap(True)
+        inspector.addWidget(self.path_label)
+        self.applicability_label = QLabel("")
+        self.applicability_label.setWordWrap(True)
+        inspector.addWidget(self.applicability_label)
         form = QFormLayout()
         self.controls, self.baseline_labels = {}, {}
-        for field, title, maximum, decimals in (
-            ("gaussian_sigma_px", "高斯 Sigma (px)", 10, 3),
-            ("min_gradient", "最小梯度", 1000000, 3),
-            ("residual_limit_px", "RANSAC 阈值 (px)", 1000, 4),
-        ):
-            box = QDoubleSpinBox()
-            box.setRange(0.001 if field == "residual_limit_px" else 0, maximum)
-            box.setDecimals(decimals)
-            box.setSingleStep(0.05 if field != "min_gradient" else 1)
+        spin_specs = (
+            ("gaussian_sigma_px", "高斯 Sigma (px)", "float", 0.0, 10.0, 3, 0.05),
+            ("canny_low", "Canny 低阈值", "int", 0, 254, 0, 1),
+            ("canny_high", "Canny 高阈值", "int", 1, 255, 0, 1),
+            ("min_gradient", "最小梯度", "float", 0.0, 1000000.0, 3, 1.0),
+            ("profile_half_width_px", "法向剖面半宽 (px)", "float", 0.5, 10.0, 2, 0.25),
+            ("profile_step_px", "剖面采样步长 (px)", "float", 0.05, 2.0, 3, 0.05),
+            ("residual_limit_px", "RANSAC 阈值 (px)", "float", 0.001, 1000.0, 4, 0.05),
+        )
+        for field, title, kind, minimum, maximum, decimals, step in spin_specs:
+            box = QSpinBox() if kind == "int" else QDoubleSpinBox()
+            box.setRange(minimum, maximum)
+            if kind == "float":
+                box.setDecimals(decimals)
+            box.setSingleStep(step)
             baseline = QLabel("—")
             line = QHBoxLayout()
             line.addWidget(baseline)
@@ -374,12 +442,30 @@ class ParameterComparisonDialog(QDialog):
             form.addRow(title, line)
             self.controls[field], self.baseline_labels[field] = box, baseline
             box.valueChanged.connect(self.mark_dirty)
-        inspector.addLayout(form)
+        self.controls["canny_low"].valueChanged.connect(self._sync_canny_constraint)
         self.ransac = QCheckBox("启用 RANSAC 异常点剔除")
         self.ransac.toggled.connect(self.mark_dirty)
-        inspector.addWidget(self.ransac)
+        ransac_base = QLabel("—")
+        ransac_line = QHBoxLayout()
+        ransac_line.addWidget(ransac_base)
+        ransac_line.addWidget(QLabel("→"))
+        ransac_line.addWidget(self.ransac, 1)
+        form.addRow("RANSAC", ransac_line)
+        self.baseline_labels["use_ransac"] = ransac_base
+        self.polarity = QComboBox()
+        for label, value in POLARITY_ITEMS:
+            self.polarity.addItem(label, value)
+        self.polarity.currentIndexChanged.connect(self.mark_dirty)
+        pol_base = QLabel("—")
+        pol_line = QHBoxLayout()
+        pol_line.addWidget(pol_base)
+        pol_line.addWidget(QLabel("→"))
+        pol_line.addWidget(self.polarity, 1)
+        form.addRow("边缘极性", pol_line)
+        self.controls["polarity"] = self.polarity
+        self.baseline_labels["polarity"] = pol_base
+        inspector.addLayout(form)
         inspector.addWidget(QLabel("RANSAC 实际剔除阈值下限为 0.10 px"))
-        inspector.addWidget(QLabel("Canny 低 / 高阈值：不参与卡尺圆路径"))
         self.update_button = QPushButton("更新预览")
         self.update_button.setObjectName("primaryButton")
         self.update_button.clicked.connect(self.request_preview)
@@ -397,7 +483,7 @@ class ParameterComparisonDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(panel)
-        scroll.setMinimumWidth(305)
+        scroll.setMinimumWidth(330)
         middle.addWidget(scroll)
         middle.setStretchFactor(0, 3)
         middle.setStretchFactor(1, 1)
@@ -430,6 +516,23 @@ class ParameterComparisonDialog(QDialog):
         self.freshness_timer.setInterval(800)
         self.freshness_timer.timeout.connect(self.check_freshness)
         self.freshness_timer.start()
+
+    def _sync_canny_constraint(self, *_):
+        low = int(self.controls["canny_low"].value())
+        high_box = self.controls["canny_high"]
+        high_box.setMinimum(low + 1)
+        if high_box.value() <= low:
+            high_box.setValue(low + 1)
+
+    def _update_applicability(self):
+        roi_type = self.source.roi_type if self.source else "Caliper Circle"
+        enabled, hint = APPLICABILITY.get(roi_type, (set(TUNABLE_FIELDS), ""))
+        for field, widget in self.controls.items():
+            widget.setEnabled(field in enabled)
+            widget.setToolTip("" if field in enabled else hint)
+        self.ransac.setEnabled("use_ransac" in enabled)
+        self.ransac.setToolTip("" if "use_ransac" in enabled else hint)
+        self.applicability_label.setText(f"当前 ROI：{roi_label(roi_type)} · {hint}" if hint else f"当前 ROI：{roi_label(roi_type)}")
 
     def populate_marks(self):
         self.mark_choice.blockSignals(True)
@@ -476,6 +579,7 @@ class ParameterComparisonDialog(QDialog):
             self.worker.requestInterruption()
         self.baseline = self.current = self.source = None
         self._initial_focus_pending = True
+        self._anchor_xy = None
         for canvas in (self.canvas, self.second_canvas):
             canvas.source = None
             canvas.set_image(None)
@@ -490,24 +594,45 @@ class ParameterComparisonDialog(QDialog):
         self.file_label.setText(self.source.image.display_name + (f" · 第 {self.source.batch_index} 张" if self.source.batch_index else ""))
         self.file_label.setToolTip(self.source.image.path)
         self.set_controls(self.source.params)
+        self._update_applicability()
         for canvas in (self.canvas, self.second_canvas):
             canvas.source = self.source
             canvas.set_image(self.source.image)
             canvas.selected = 0
+            canvas.selected_pair = (0, 0)
         self.request_preview()
 
     def set_controls(self, params):
+        low_val = int(params.canny_low)
+        high_val = max(low_val + 1, int(params.canny_high))
+        self.controls["canny_low"].blockSignals(True)
+        self.controls["canny_high"].blockSignals(True)
+        self.controls["canny_low"].setValue(low_val)
+        self.controls["canny_high"].setMinimum(low_val + 1)
+        self.controls["canny_high"].setValue(high_val)
+        self.controls["canny_low"].blockSignals(False)
+        self.controls["canny_high"].blockSignals(False)
         for field, control in self.controls.items():
+            if field in {"canny_low", "canny_high"}:
+                continue
             control.blockSignals(True)
-            control.setValue(getattr(params, field))
+            if field == "polarity":
+                idx = control.findData(params.polarity)
+                control.setCurrentIndex(max(0, idx))
+            else:
+                control.setValue(getattr(params, field))
             control.blockSignals(False)
         self.ransac.blockSignals(True)
-        self.ransac.setChecked(params.use_ransac)
+        self.ransac.setChecked(bool(params.use_ransac))
         self.ransac.blockSignals(False)
 
     def preview_params(self):
-        return replace(self.source.params, **{field: box.value() for field, box in self.controls.items()},
-                       use_ransac=self.ransac.isChecked())
+        values = {}
+        for field, box in self.controls.items():
+            values[field] = box.currentData() if field == "polarity" else box.value()
+        values["canny_high"] = max(int(values["canny_low"]) + 1, int(values["canny_high"]))
+        values["use_ransac"] = self.ransac.isChecked()
+        return replace(self.source.params, **values)
 
     def mark_dirty(self, *_):
         self._dirty = True
@@ -560,39 +685,93 @@ class ParameterComparisonDialog(QDialog):
         self._dirty = False
         self.status.setText("预览失败：" + current.error if current.error else "预览完成 · 正式结果与配方未修改")
         self.refresh_results()
-        if self._initial_focus_pending and current.circle is not None:
-            self.focus_circle(current.circle)
+        if self._initial_focus_pending and current.ok:
+            self.focus_result(current)
             self._initial_focus_pending = False
+
+    def _format_baseline_field(self, params, field):
+        val = getattr(params, field)
+        if field == "use_ransac":
+            return "开启" if val else "关闭"
+        if field == "polarity":
+            return POLARITY_LABELS.get(val, str(val))
+        return f"{val:g}"
 
     def refresh_results(self):
         for field, label in self.baseline_labels.items():
-            label.setText(f"{getattr(self.baseline.params, field):g}" if self.baseline else "—")
+            label.setText(self._format_baseline_field(self.baseline.params, field) if self.baseline else "—")
         if self.baseline:
             self.ransac.setToolTip("基准：RANSAC " + ("开启" if self.baseline.params.use_ransac else "关闭"))
+        ref = self.current or self.baseline
+        self.path_label.setText(f"实际命中路径：{ref.path}" if ref and ref.path else "实际命中路径：—")
         for canvas in (self.canvas, self.second_canvas):
             canvas.baseline, canvas.current = self.baseline, self.current
             canvas.update()
+        is_caliper = self.source is None or self.source.roi_type == "Caliper Circle"
+        p_label = (ref.primary[0] if ref and ref.primary[0] else None) or ("直径 (μm)" if is_caliper else "主特征尺寸 (μm)")
+        titles = (
+            "有效点 / 卡尺数" if is_caliper else "有效点 / 候选边缘点",
+            "覆盖率 (%)" if is_caliper else "保留率 (%)",
+            "参考残差 (μm)" if is_caliper else "拟合残差 (μm)",
+            p_label,
+        )
         def values(result):
             if result is None:
                 return [None] * 4
-            return [result.valid_count, None if result.coverage is None else 100 * result.coverage,
-                    result.residual_um, result.diameter_um]
+            p_val = result.diameter_um if is_caliper else (result.primary[1] if result.primary[0] else result.diameter_um)
+            return [result.valid_count if (is_caliper or result.ok) else None,
+                    None if result.coverage is None else 100 * result.coverage,
+                    result.residual_um, p_val]
         a, b = values(self.baseline), values(self.current)
-        for row, title in enumerate(("有效点 / 卡尺数", "覆盖率 (%)", "参考残差 (μm)", "直径 (μm)")):
+        for row, title in enumerate(titles):
             cells = [title]
             for result, vals in ((self.baseline, a), (self.current, b)):
                 value = vals[row]
-                planned = int(np.clip(self.source.roi.caliper_count, 4, 720)) if self.source else 0
-                cells.append("—" if value is None else f"{value} / {planned}" if row == 0 else f"{value:.4f}")
-            cells.append("—" if a[row] is None or b[row] is None else f"{b[row] - a[row]:+d}" if row == 0 else f"{b[row] - a[row]:+.4f}" + (" 个百分点" if row == 1 else ""))
+                denom = (int(np.clip(self.source.roi.caliper_count, 4, 720)) if is_caliper
+                         else (result.candidate_count if result else 0)) if self.source else 0
+                if value is None:
+                    cells.append("—")
+                elif row == 0:
+                    cells.append(f"{value} / {denom}")
+                elif row == 3 and result and result.primary[2] is not None:
+                    unit = "°" if self.source and self.source.roi_type == "Approximate Line" else ""
+                    cells.append(f"{value:.4f} / {result.primary[2]:.4f}{unit}")
+                else:
+                    cells.append(f"{value:.4f}")
+            if a[row] is None or b[row] is None:
+                cells.append("—")
+            elif row == 0:
+                cells.append(f"{b[row] - a[row]:+d}")
+            else:
+                cells.append(f"{b[row] - a[row]:+.4f}" + (" 个百分点" if row == 1 else ""))
             for column, text in enumerate(cells):
                 self.metrics.setItem(row, column, QTableWidgetItem(text))
-        self.select_caliper(self.canvas.selected)
+        if is_caliper:
+            self.select_caliper(self.canvas.selected)
+        elif self._anchor_xy is not None:
+            self.select_nearest_point(*self._anchor_xy)
+        else:
+            self.select_record_pair(0, 0)
         self.check_freshness()
+
+    def _status_summary(self, result):
+        if not result or not result.stats:
+            return ""
+        by = result.stats.get("by_status", {})
+        parts = [f"候选 {result.candidate_count}"]
+        for key, name in (("valid", "保留"), ("below_gradient_threshold", "梯度淘汰"),
+                          ("outside_roi_mask", "掩膜外"), ("target_edge_filtered", "边界过滤"),
+                          ("fit_rejected", "RANSAC剔除")):
+            if by.get(key):
+                parts.append(f"{name} {by[key]}")
+        return "统计：" + " · ".join(parts)
 
     def select_caliper(self, index):
         if self.source is None:
-            self.point_info.setText("请选择有图像的卡尺圆 ROI")
+            self.point_info.setText("请选择有图像的手动 ROI")
+            return
+        if self.source.roi_type != "Caliper Circle":
+            self.select_record_pair(index, index)
             return
         self.canvas.selected = self.second_canvas.selected = index
         count = int(np.clip(self.source.roi.caliper_count, 4, 720))
@@ -610,8 +789,50 @@ class ParameterComparisonDialog(QDialog):
         self.canvas.update()
         self.second_canvas.update()
 
+    def select_nearest_point(self, x, y):
+        if self.source is None:
+            return
+        self._anchor_xy = (float(x), float(y))
+        b_idx = nearest_record(self.baseline, x, y) if self.baseline and self.baseline.records else 0
+        c_idx = nearest_record(self.current, x, y) if self.current and self.current.records else 0
+        self.select_record_pair(b_idx or 0, c_idx or 0)
+
+    def select_record_pair(self, b_idx, c_idx):
+        if self.source is None:
+            self.point_info.setText("请选择有图像的手动 ROI")
+            return
+        b_idx = int(b_idx or 0)
+        c_idx = int(c_idx or 0)
+        for canvas in (self.canvas, self.second_canvas):
+            canvas.selected = c_idx
+            canvas.selected_pair = (b_idx, c_idx)
+        ref = self.current or self.baseline
+        ridx = c_idx if ref is self.current else b_idx
+        if ref and ridx < len(ref.records):
+            ax, ay = _record_anchor(ref.records[ridx])
+            if self._anchor_xy is None:
+                self._anchor_xy = (ax, ay)
+            self.selected_label.setText(f"采样剖面 {ridx + 1} / {len(ref.records)} · ({ax:.1f}, {ay:.1f})")
+        else:
+            self.selected_label.setText("采样剖面 —")
+        lines = []
+        for title, result, idx in (("基准", self.baseline, b_idx), ("当前", self.current, c_idx)):
+            if result and idx < len(result.records):
+                status = result.records[idx]["status"]
+                color = CYAN if title == "基准" else RED if status in {"fit_rejected", "below_gradient_threshold", "outside_roi_mask"} else AMBER
+                lines.append(f'<span style="color:{color}">{title}：{STATUS.get(status, "未完成")}</span>')
+        if self.current:
+            lines.append(escape(point_explanation(self.current, c_idx)).replace("\n", "<br>"))
+            summary = self._status_summary(self.current)
+            if summary:
+                lines.append(escape(summary))
+        self.point_info.setText("<br>".join(lines))
+        self.plot.set_data(self.source, self.baseline, self.current, (b_idx, c_idx))
+        self.canvas.update()
+        self.second_canvas.update()
+
     def rebase(self):
-        if self.current and self.current.circle is not None and not self._dirty:
+        if self.current and self.current.ok and not self._dirty:
             self.baseline = self.current
             self.refresh_results()
 
@@ -622,7 +843,7 @@ class ParameterComparisonDialog(QDialog):
 
     def check_freshness(self):
         fresh = self.source is not None and self.source.is_current(self.main)
-        usable = self.current is not None and self.current.circle is not None and not self._dirty
+        usable = self.current is not None and self.current.ok and not self._dirty
         different = bool(self.source and self.current and any(
             getattr(self.source.params, field) != getattr(self.current.params, field) for field in TUNABLE_FIELDS))
         self.apply_button.setEnabled(bool(fresh and usable and different))
@@ -631,7 +852,7 @@ class ParameterComparisonDialog(QDialog):
             self.status.setText("主页面图像、ROI、参数或工作状态已改变；此处保留旧快照，请重新同步后应用。")
 
     def apply_parameters(self):
-        if self._dirty or not self.current or self.current.circle is None or not self.source or not self.source.is_current(self.main):
+        if self._dirty or not self.current or not self.current.ok or not self.source or not self.source.is_current(self.main):
             self.check_freshness()
             return False
         changed = any(getattr(self.main.params, field) != getattr(self.current.params, field) for field in TUNABLE_FIELDS)
@@ -640,12 +861,32 @@ class ParameterComparisonDialog(QDialog):
             return True
         for field in TUNABLE_FIELDS:
             setattr(self.main.params, field, getattr(self.current.params, field))
-        for field, name in (("gaussian_sigma_px", "sigma_spin"), ("min_gradient", "min_gradient_spin"),
-                            ("residual_limit_px", "residual_limit_spin"), ("use_ransac", "ransac_check")):
-            widget = getattr(self.main, name)
+        widget_map = (
+            ("gaussian_sigma_px", "sigma_spin"),
+            ("canny_low", "canny_low_spin"),
+            ("canny_high", "canny_high_spin"),
+            ("min_gradient", "min_gradient_spin"),
+            ("profile_half_width_px", "profile_half_spin"),
+            ("profile_step_px", "profile_step_spin"),
+            ("residual_limit_px", "residual_limit_spin"),
+            ("use_ransac", "ransac_check"),
+            ("polarity", "polarity_combo"),
+        )
+        for field, name in widget_map:
+            widget = getattr(self.main, name, None)
+            if widget is None:
+                continue
             widget.blockSignals(True)
             if field == "use_ransac":
-                widget.setChecked(self.current.params.use_ransac)
+                widget.setChecked(bool(self.current.params.use_ransac))
+            elif field == "polarity":
+                setter = getattr(self.main, "_set_combo_value", None)
+                if setter is not None:
+                    setter(widget, self.current.params.polarity)
+                else:
+                    idx = widget.findData(self.current.params.polarity)
+                    if idx >= 0:
+                        widget.setCurrentIndex(idx)
             else:
                 widget.setValue(getattr(self.current.params, field))
             widget.blockSignals(False)
@@ -685,12 +926,24 @@ class ParameterComparisonDialog(QDialog):
             canvas.reset_view()
 
     def focus_circle(self, circle):
+        self._focus_box(circle.center_x_px, circle.center_y_px, 2 * circle.radius_px)
+
+    def focus_result(self, result):
+        if result.circle is not None:
+            self.focus_circle(result.circle)
+            return
+        det = result.detection
+        if det is not None:
+            span = max(float(det.diameter_px or 0), float(self.source.roi.w), float(self.source.roi.h), 16.0)
+            self._focus_box(det.center_x_px, det.center_y_px, span)
+
+    def _focus_box(self, cx, cy, span):
         canvas = self.canvas
         canvas._update_transform()
-        scale = 0.72 * min(canvas.width(), canvas.height()) / max(2 * circle.radius_px, 1)
+        scale = 0.72 * min(canvas.width(), canvas.height()) / max(span, 1)
         canvas.user_zoom = scale / max(canvas.fit_scale, 1e-12)
         canvas._update_transform()
-        x, y = canvas.image_to_widget(circle.center_x_px, circle.center_y_px)
+        x, y = canvas.image_to_widget(cx, cy)
         canvas.pan_x += canvas.width() / 2 - x
         canvas.pan_y += canvas.height() / 2 - y
         self.sync_view(canvas, self.second_canvas)
@@ -700,10 +953,9 @@ class ParameterComparisonDialog(QDialog):
         if not self.current or self.canvas.selected >= len(self.current.records):
             return
         r = self.current.records[self.canvas.selected]
-        point = r.get("selected")
-        if point:
-            position = QPointF(*self.canvas.image_to_widget(point["x"], point["y"])).toPoint()
-            self.canvas.zoom_by(2, position)
+        x, y = _record_anchor(r)
+        position = QPointF(*self.canvas.image_to_widget(x, y)).toPoint()
+        self.canvas.zoom_by(2, position)
 
     def stop_worker(self):
         self._pending = None

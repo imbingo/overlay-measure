@@ -258,30 +258,47 @@ def detect_primary_contour_edges(
     roi: Roi,
     params: DetectionParams,
     expected_shape: str = "Any",
+    diagnostics: list | None = None,
 ) -> SubpixelEdges:
-    """Select one connected target, then refine only its contour to subpixels."""
+    """Select one connected target, then refine only its contour to subpixels.
+
+    ``diagnostics`` (optional) receives the normal-profile records of the
+    contour actually returned; it never changes the result.
+    """
     from .closed_edge_detector import closed_round_edges
+
+    def trace():
+        return [] if diagnostics is not None else None
+
+    def emit(records, result):
+        if diagnostics is not None and records:
+            diagnostics.extend(records)
+        return result
 
     round_roi = roi.roi_type in {"Circle", "Ellipse"}
     if round_roi:
-        ring_edges = closed_round_edges(gray, roi, params, require_nested=True)
+        ring_records = trace()
+        ring_edges = closed_round_edges(gray, roi, params, require_nested=True, diagnostics=ring_records)
         if ring_edges is not None:
-            return ring_edges
+            return emit(ring_records, ring_edges)
     try:
         candidate, (x0, y0, _x1, _y1), _contrast = _segment_primary_candidate(
             gray, roi, params, expected_shape,
         )
     except ValueError:
-        fallback = closed_round_edges(gray, roi, params) if round_roi else None
+        fallback_records = trace()
+        fallback = closed_round_edges(gray, roi, params, diagnostics=fallback_records) if round_roi else None
         if fallback is not None:
-            return fallback
+            return emit(fallback_records, fallback)
         raise
     contour_global = candidate.contour.reshape(-1, 2).astype(np.float64)
     contour_global[:, 0] += x0
     contour_global[:, 1] += y0
-    points, gradients = refine_contour_edges(gray, contour_global, params)
+    contour_records = trace()
+    points, gradients = refine_contour_edges(gray, contour_global, params, diagnostics=contour_records)
     if round_roi:
-        alternative = closed_round_edges(gray, roi, params)
+        alternative_records = trace()
+        alternative = closed_round_edges(gray, roi, params, diagnostics=alternative_records)
         if alternative is not None:
             # A threshold contour can sit on the weak outer halo. Replace it
             # only with a substantially stronger, nearby complete boundary.
@@ -289,15 +306,16 @@ def detect_primary_contour_edges(
                                   - np.mean(contour_global, axis=0)) < 0.1 * max(roi.w, roi.h)
             strength = float(np.median(gradients)) if len(gradients) else 0.0
             if near and float(np.median(alternative.gradients)) > 2.0 * strength:
-                return alternative
+                return emit(alternative_records, alternative)
     if len(points) < 3:
+        emit(contour_records, None)
         raise ValueError("主目标轮廓的有效亚像素边缘点不足")
-    return SubpixelEdges(
+    return emit(contour_records, SubpixelEdges(
         points_xy=points,
         gradients=gradients,
         roi_origin=(x0, y0),
         warning=f"主目标轮廓：{candidate.polarity}，已过滤 ROI 内其他噪声与轮廓",
-    )
+    ))
 
 
 def detect_region_center(gray: np.ndarray, roi: Roi, params: DetectionParams) -> FitResult:

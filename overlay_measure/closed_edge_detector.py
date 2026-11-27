@@ -8,7 +8,7 @@ from .image_loader import normalize_to_uint8
 from .subpixel_edge_detector import SubpixelEdges, refine_contour_edges
 
 
-def closed_round_edges(gray, roi, params, *, require_nested=False):
+def closed_round_edges(gray, roi, params, *, require_nested=False, diagnostics=None):
     roi = roi.normalized()
     x0, y0, x1, y1 = roi.to_int_bounds(gray.shape)
     crop = np.asarray(gray[y0:y1, x0:x1], dtype=np.float32)
@@ -50,12 +50,14 @@ def closed_round_edges(gray, roi, params, *, require_nested=False):
             continue
         if abs(area / (np.pi * a * b / 4) - 1) > 0.15:
             continue
+        records = [] if diagnostics is not None else None
         refined, gradients = refine_contour_edges(
             gray,
             points,
             params,
             precomputed=precomputed,
             origin_xy=(float(x0), float(y0)),
+            diagnostics=records,
         )
         if len(refined) < params.min_edge_points or len(refined) < 0.75 * min(len(points), 1200):
             continue
@@ -64,7 +66,7 @@ def closed_round_edges(gray, roi, params, *, require_nested=False):
         center = np.array([cx + x0, cy + y0])
         center_distance = np.linalg.norm(center - roi.center()) / roi_span
         score = float(np.median(gradients)) / (1 + 4 * center_distance)
-        candidates.append((score, area, center, refined, gradients))
+        candidates.append((score, area, center, refined, gradients, records))
     if not candidates:
         return None
     if require_nested:
@@ -76,6 +78,8 @@ def closed_round_edges(gray, roi, params, *, require_nested=False):
         )
         if not nested:
             return None
-    _, _, _, points, gradients = max(candidates, key=lambda item: item[0])
+    _, _, _, points, gradients, records = max(candidates, key=lambda item: item[0])
+    if diagnostics is not None and records:
+        diagnostics.extend(records)
     return SubpixelEdges(points, gradients, (x0, y0),
                          "主目标轮廓：闭合边缘筛选，使用最强完整边界（排除光晕混边）")
